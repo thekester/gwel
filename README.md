@@ -14,8 +14,9 @@ pytest
 The current package contains a dependency-free routing baseline and an offline
 oracle labeler. The labeler selects the cheapest measured action that produced
 a correct answer, which is the first step toward a supervised routing dataset.
-Model, dataset, and device-specific integrations will be added as the
-benchmark protocol is validated.
+It also includes aggregate evaluation metrics for accuracy, resource costs,
+escalation rate, and oracle gap. Model, dataset, and device-specific
+integrations will be added as the benchmark protocol is validated.
 
 ## Citation
 

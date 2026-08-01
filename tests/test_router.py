@@ -4,7 +4,10 @@ from gwel import (
     ActionProfile,
     BudgetRouter,
     CostWeights,
+    PolicyResult,
     label_minimal_action,
+    oracle_gap,
+    summarize,
 )
 
 
@@ -58,3 +61,29 @@ def test_oracle_returns_none_when_all_actions_fail() -> None:
     ]
 
     assert label_minimal_action(measurements).action is None
+
+
+def test_summary_reports_accuracy_and_escalation_rate() -> None:
+    results = [
+        PolicyResult(Action.LOW_RES, True, 20, 300, 8, 64),
+        PolicyResult(Action.CROP, True, 35, 450, 10, 96),
+        PolicyResult(Action.OCR, False, 15, 250, 5, 16),
+    ]
+
+    summary = summarize(results)
+
+    assert summary.accuracy == 2 / 3
+    assert summary.escalation_rate == 2 / 3
+    assert summary.action_counts[Action.CROP] == 1
+
+
+def test_oracle_gap_requires_aligned_inputs() -> None:
+    result = PolicyResult(Action.CROP, True, 35, 450, 10, 96)
+    assert oracle_gap([result], [50]) == 91
+
+    try:
+        oracle_gap([result], [])
+    except ValueError as error:
+        assert "same length" in str(error)
+    else:
+        raise AssertionError("expected mismatched inputs to raise ValueError")
