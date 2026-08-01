@@ -1,4 +1,11 @@
-from gwel import Action, ActionProfile, BudgetRouter
+from gwel import (
+    Action,
+    ActionMeasurement,
+    ActionProfile,
+    BudgetRouter,
+    CostWeights,
+    label_minimal_action,
+)
 
 
 def test_router_selects_highest_utility_action_that_fits_budget() -> None:
@@ -27,3 +34,27 @@ def test_router_rejects_impossible_budget() -> None:
         assert str(error) == "no action fits the supplied resource budgets"
     else:
         raise AssertionError("expected an impossible budget to raise ValueError")
+
+
+def test_oracle_labels_cheapest_correct_action() -> None:
+    measurements = [
+        ActionMeasurement(Action.LOW_RES, True, 20, 300, 8, 64),
+        ActionMeasurement(Action.CROP, True, 35, 450, 10, 96),
+        ActionMeasurement(Action.OCR, True, 15, 250, 5, 16),
+    ]
+
+    label = label_minimal_action(
+        measurements,
+        weights=CostWeights(latency=1, memory=0, energy=2, visual_tokens=0.1),
+    )
+
+    assert label.action is Action.OCR
+
+
+def test_oracle_returns_none_when_all_actions_fail() -> None:
+    measurements = [
+        ActionMeasurement(Action.LOW_RES, False, 20, 300, 8, 64),
+        ActionMeasurement(Action.CROP, False, 35, 450, 10, 96),
+    ]
+
+    assert label_minimal_action(measurements).action is None
