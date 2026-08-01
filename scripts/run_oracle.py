@@ -21,6 +21,10 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
+    # NVML initialization before CUDA Torch can break c10.dll loading on
+    # Windows. The inference CLI requires Torch, so establish the safe order.
+    import torch  # noqa: F401
+
     config = load_config(args.config)
     examples = read_manifest(config.paths.pilot_manifest)
     if args.limit is not None:

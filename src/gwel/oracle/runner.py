@@ -121,6 +121,24 @@ def prepare_ops(
     return ops
 
 
+def planned_config_ids(config: GwelConfig) -> tuple[str, ...]:
+    """Return operation IDs without loading an image or invoking any tool."""
+    runner = config.runner
+    ids: list[str] = []
+    if runner.include_no_image:
+        ids.append("no_image")
+    ids.extend(f"lowres_{size}" for size in runner.lowres_sizes)
+    if runner.include_full:
+        ids.append("full")
+    ids.extend(
+        f"crop_r{row}c{col}"
+        for row in range(runner.crop.rows)
+        for col in range(runner.crop.cols)
+    )
+    ids.append(f"ocr_{runner.ocr.source}")
+    return tuple(ids)
+
+
 class OracleRunner:
     """Execute all configurations for a set of examples and log records."""
 
@@ -205,9 +223,15 @@ class OracleRunner:
         """
         done = load_done_keys(out_path)
         counters = {"examples": 0, "written": 0, "skipped": 0, "failed": 0}
+        config_ids = planned_config_ids(self.config)
+        ensure_loaded = getattr(self.engine, "ensure_loaded", None)
+        model_prepared = False
 
         for example in examples:
             counters["examples"] += 1
+            if all((example.example_id, config_id) in done for config_id in config_ids):
+                counters["skipped"] += len(config_ids)
+                continue
             try:
                 image = Image.open(example.image_path).convert("RGB")
             except OSError as error:
@@ -221,6 +245,11 @@ class OracleRunner:
                     counters["skipped"] += 1
                     continue
                 try:
+                    # Startup is reported separately and must not contaminate
+                    # the first action's steady-state hardware measurements.
+                    if not model_prepared and callable(ensure_loaded):
+                        ensure_loaded()
+                        model_prepared = True
                     record = self.run_op(example, op)
                 except Exception:
                     logger.exception(

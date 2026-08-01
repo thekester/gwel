@@ -91,6 +91,7 @@ class RouterConfig:
 @dataclass(frozen=True)
 class DatasetsConfig:
     seed: int = 1234
+    shuffle_buffer_size: int = 10_000
     image_dir: str = "data/processed/pilot/images"
     per_dataset: dict[str, int] = field(
         default_factory=lambda: {"vqav2": 250, "textvqa": 250, "docvqa": 250, "vstar": 100}

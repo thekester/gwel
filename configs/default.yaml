@@ -60,6 +60,7 @@ router:
 
 datasets:
   seed: 1234
+  shuffle_buffer_size: 10000
   image_dir: data/processed/pilot/images
   per_dataset:
     vqav2: 250

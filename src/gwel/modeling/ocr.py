@@ -5,7 +5,9 @@ can measure the real cold-start cost of escalating to the OCR action.
 """
 
 import time
+import shutil
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -43,6 +45,11 @@ class LazyOcrEngine:
         start = time.perf_counter()
         if self.backend == "pytesseract":
             import pytesseract
+
+            if shutil.which("tesseract") is None:
+                windows_install = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+                if windows_install.exists():
+                    pytesseract.pytesseract.tesseract_cmd = str(windows_install)
 
             self._reader = pytesseract
         else:

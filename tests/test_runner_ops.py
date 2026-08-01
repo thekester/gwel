@@ -2,7 +2,7 @@ from PIL import Image
 
 from gwel.actions import Action
 from gwel.config import GwelConfig
-from gwel.oracle.runner import prepare_ops
+from gwel.oracle.runner import planned_config_ids, prepare_ops
 from gwel.router.budget import ActionProfile, BudgetRouter
 
 
@@ -16,6 +16,22 @@ def test_prepare_ops_covers_all_configurations() -> None:
     assert "full" in ids
     assert sum(1 for i in ids if i.startswith("crop_")) == 4  # 2x2 grid
     assert len(ids) == len(set(ids))
+
+
+def test_planned_ids_include_tool_ops_without_running_them() -> None:
+    ids = planned_config_ids(GwelConfig())
+
+    assert ids == (
+        "no_image",
+        "lowres_256",
+        "lowres_384",
+        "full",
+        "crop_r0c0",
+        "crop_r0c1",
+        "crop_r1c0",
+        "crop_r1c1",
+        "ocr_full",
+    )
 
 
 def test_prepare_ops_actions_and_images() -> None:

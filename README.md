@@ -8,7 +8,7 @@ Gwel picks the cheapest visual action per query: answer from low-res, request a 
 
 ```bash
 python -m pip install -e ".[dev]"        # core (numpy, pillow, psutil, pyyaml) + pytest
-python -m pip install -e ".[model,gpu]"  # torch, transformers>=4.49, pynvml for real runs
+python -m pip install -e ".[model,gpu]"  # torch, transformers 4.x, pynvml for real runs
 python -m pip install -e ".[data,ocr]"   # datasets streaming, pytesseract
 pytest
 ```
@@ -25,6 +25,9 @@ python scripts/compute_labels.py     # derive the cheapest-correct-action oracle
 python scripts/train_router.py       # distill oracle labels into the MLP router
 python scripts/measure_coldstart.py  # cold vs warm tool-loading costs
 ```
+
+For a one-example end-to-end validation, replace the config argument with
+`--config configs/smoke.yaml` at each stage.
 
 Per example the oracle runner measures: blind baseline, low-res previews at
 several sizes (ANSWER_LOW), capped full resolution (diagnostic), preview + one

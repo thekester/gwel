@@ -7,7 +7,7 @@ so the oracle runner never depends on ``datasets`` at run time.
 """
 
 import json
-import random
+import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +17,7 @@ from ..config import DatasetsConfig
 #: HuggingFace sources for each pilot subset. All are validation/test splits
 #: with public answers, streamed so only the sampled rows are downloaded.
 DATASET_SOURCES: dict[str, dict[str, str]] = {
-    "vqav2": {"path": "HuggingFaceM4/VQAv2", "split": "validation"},
+    "vqav2": {"path": "lmms-lab/VQAv2", "split": "validation"},
     "textvqa": {"path": "lmms-lab/textvqa", "split": "validation"},
     "docvqa": {"path": "lmms-lab/DocVQA", "name": "DocVQA", "split": "validation"},
     "vstar": {"path": "craigwu/vstar_bench", "split": "test"},
@@ -110,6 +110,15 @@ def build_pilot(
     with the configured seed, saves images as PNG under ``config.image_dir``,
     and writes the manifest. Requires the ``datasets`` extra.
     """
+    # On Windows, loading PyArrow before an installed CUDA Torch can make
+    # c10.dll initialization fail. Datasets detects Torch anyway, so establish
+    # the safe DLL load order explicitly before importing datasets.
+    if os.name == "nt":
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            pass
+
     try:
         import datasets as hf_datasets
     except ImportError as error:
@@ -121,10 +130,9 @@ def build_pilot(
 
     image_dir = Path(config.image_dir)
     image_dir.mkdir(parents=True, exist_ok=True)
-    rng = random.Random(config.seed)
     examples: list[PilotExample] = []
 
-    for name, count in config.per_dataset.items():
+    for dataset_index, (name, count) in enumerate(config.per_dataset.items()):
         if count <= 0:
             continue
         if name not in DATASET_SOURCES:
@@ -136,25 +144,20 @@ def build_pilot(
             split=source["split"],
             streaming=True,
         )
+        stream = stream.shuffle(
+            seed=config.seed + dataset_index,
+            buffer_size=config.shuffle_buffer_size,
+        )
 
-        # Reservoir sampling over the stream keeps memory flat and the seed
-        # makes the pilot reproducible for a fixed source snapshot.
-        reservoir: list[tuple[int, dict[str, object]]] = []
-        for index, row in enumerate(stream):
-            if len(reservoir) < count:
-                reservoir.append((index, dict(row)))
-            else:
-                slot = rng.randint(0, index)
-                if slot < count:
-                    reservoir[slot] = (index, dict(row))
-        reservoir.sort(key=lambda item: item[0])
-
-        for index, row in reservoir:
+        selected = 0
+        for index, raw_row in enumerate(stream):
+            row = dict(raw_row)
             qa = _extract_qa(name, row)
             image = row.get("image")
             if qa is None or not isinstance(image, Image.Image):
                 continue
-            example_id = f"{name}-{index:06d}"
+            row_id = row.get("question_id") or row.get("id") or index
+            example_id = f"{name}-{row_id}"
             image_path = image_dir / f"{example_id}.png"
             if not image_path.exists():
                 downscale(image.convert("RGB"), max_image_side).save(image_path)
@@ -167,6 +170,9 @@ def build_pilot(
                     answers=qa[1],
                 )
             )
+            selected += 1
+            if selected >= count:
+                break
 
     write_manifest(manifest_path, examples)
     return examples

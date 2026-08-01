@@ -1,0 +1,66 @@
+model:
+  model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/smoke
+  pilot_manifest: data/processed/smoke/manifest.jsonl
+  records: results/runs/smoke_records.jsonl
+  labels: results/runs/smoke_labels.jsonl
+  router_dir: results/router-smoke
+
+runner:
+  lowres_sizes: [256]
+  full_longest_side: 1024
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.0005
+  lambda_energy_per_mj: 0.0002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.002
+
+router:
+  feature_config_id: lowres_256
+  hidden_dims: [32]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 2
+  batch_size: 4
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 100
+  image_dir: data/processed/smoke/images
+  per_dataset:
+    vqav2: 1
+    textvqa: 0
+    docvqa: 0
+    vstar: 0

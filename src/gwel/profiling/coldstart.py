@@ -17,10 +17,10 @@ from dataclasses import dataclass
 TOOL_SNIPPETS: dict[str, str] = {
     "pytesseract": (
         "def init():\n"
-        "    import pytesseract\n"
         "    from PIL import Image\n"
+        "    from gwel.modeling.ocr import LazyOcrEngine\n"
         "    image = Image.new('RGB', (64, 32), 'white')\n"
-        "    return pytesseract.image_to_string(image)\n"
+        "    return LazyOcrEngine('pytesseract').extract(image)\n"
     ),
     "easyocr": (
         "def init():\n"
