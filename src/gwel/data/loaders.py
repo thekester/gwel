@@ -98,6 +98,93 @@ def _extract_qa(dataset: str, row: dict[str, object]) -> tuple[str, tuple[str, .
     return str(question), answers
 
 
+def _vstar_gold_answers(options: list[str]) -> tuple[str, ...]:
+    """Gold answers from V*Bench options (index 0 is correct by convention).
+
+    Options are templated sentences ("The color of the flag is white."); the
+    short-form answer is the part of option 0 not shared with the others, so
+    both the short form and the full sentence are returned for matching.
+    """
+    correct = options[0].strip()
+    if len(options) < 2:
+        return (correct,)
+    prefix_len = 0
+    for index in range(min(len(option) for option in options)):
+        if all(option[index] == correct[index] for option in options[1:]):
+            prefix_len = index + 1
+        else:
+            break
+    short = correct[prefix_len:].strip().rstrip(".").strip()
+    answers = [short, correct] if short else [correct]
+    # Positional answers ("right side of the box") should also accept the
+    # bare direction, which is what a short-phrase prompt elicits.
+    head = short.split()[0].lower() if short else ""
+    if head in ("left", "right", "top", "bottom", "above", "below") and head != short.lower():
+        answers.append(head)
+    return tuple(answers)
+
+
+def _build_vstar(
+    count: int,
+    *,
+    seed: int,
+    image_dir: Path,
+    max_image_side: int,
+) -> list[PilotExample]:
+    """Sample V*Bench examples directly from its raw image+JSON layout.
+
+    The repository is not an Arrow dataset: each example is a ``stem.json``
+    metadata file next to ``stem.{jpg,png,webp,...}``. Sampling is seeded over
+    the sorted JSON list, balanced across subfolders by interleaving.
+    """
+    import random
+
+    from huggingface_hub import HfApi, hf_hub_download
+    from PIL import Image
+
+    from ..modeling.imaging import downscale
+
+    repo = DATASET_SOURCES["vstar"]["path"]
+    files = [f.rfilename for f in HfApi().dataset_info(repo).siblings]
+    json_files = sorted(f for f in files if f.endswith(".json"))
+    stems_to_image = {
+        f.rsplit(".", 1)[0]: f for f in files if not f.endswith((".json", ".gitattributes"))
+    }
+
+    rng = random.Random(seed)
+    candidates = [f for f in json_files if f.rsplit(".", 1)[0] in stems_to_image]
+    rng.shuffle(candidates)
+
+    examples: list[PilotExample] = []
+    for json_name in candidates:
+        if len(examples) >= count:
+            break
+        stem = json_name.rsplit(".", 1)[0]
+        payload = json.loads(
+            Path(hf_hub_download(repo, json_name, repo_type="dataset")).read_text(encoding="utf-8")
+        )
+        question = payload.get("question")
+        options = payload.get("options")
+        if not question or not isinstance(options, list) or not options:
+            continue
+        image_file = hf_hub_download(repo, stems_to_image[stem], repo_type="dataset")
+        example_id = "vstar-" + stem.replace("/", "-")
+        image_path = image_dir / f"{example_id}.png"
+        if not image_path.exists():
+            with Image.open(image_file) as image:
+                downscale(image.convert("RGB"), max_image_side).save(image_path)
+        examples.append(
+            PilotExample(
+                example_id=example_id,
+                dataset="vstar",
+                image_path=str(image_path),
+                question=str(question),
+                answers=_vstar_gold_answers([str(o) for o in options]),
+            )
+        )
+    return examples
+
+
 def build_pilot(
     config: DatasetsConfig,
     *,
@@ -137,6 +224,16 @@ def build_pilot(
             continue
         if name not in DATASET_SOURCES:
             raise KeyError(f"unknown pilot dataset {name!r}; known: {sorted(DATASET_SOURCES)}")
+        if name == "vstar":
+            examples.extend(
+                _build_vstar(
+                    count,
+                    seed=config.seed + dataset_index,
+                    image_dir=image_dir,
+                    max_image_side=max_image_side,
+                )
+            )
+            continue
         source = DATASET_SOURCES[name]
         stream = hf_datasets.load_dataset(
             source["path"],

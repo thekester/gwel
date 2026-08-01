@@ -56,11 +56,15 @@ class OracleLabel:
 
 
 def record_cost(record: RunRecord, weights: CostWeights = CostWeights()) -> float:
-    """Evaluate J on one record's measured outcome."""
+    """Evaluate J on one record's measured outcome.
+
+    Energy uses the idle-baseline-subtracted value when available, so the
+    cost reflects the marginal draw of the action rather than the whole board.
+    """
     return compute_cost(
         correct=record.correct,
         latency_ms=record.latency_ms,
-        energy_mj=record.total_energy_mj,
+        energy_mj=record.net_energy_mj,
         memory_mb=record.ram_peak_mb,
         visual_tokens=record.visual_tokens,
         weights=weights,

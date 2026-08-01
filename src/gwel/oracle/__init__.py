@@ -5,6 +5,7 @@ from .label import OracleLabel, derive_labels, label_example, read_labels, recor
 from .records import (
     RunRecord,
     append_records,
+    deduplicate_records,
     load_done_keys,
     read_records,
     records_to_parquet,
@@ -16,6 +17,7 @@ __all__ = [
     "RunRecord",
     "append_records",
     "compute_cost",
+    "deduplicate_records",
     "derive_labels",
     "label_example",
     "load_done_keys",

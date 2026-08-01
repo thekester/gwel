@@ -144,6 +144,32 @@ class NvmlPowerBackend(EnergyBackend):
         return energy_mj
 
 
+def sample_idle_power_mw(
+    device_index: int = 0,
+    *,
+    duration_s: float = 2.0,
+    interval_ms: int = 50,
+) -> float | None:
+    """Mean GPU power draw (mW) over an idle window, or ``None`` without NVML.
+
+    NVML reports whole-board power including idle draw; sampling a quiet
+    window before a run lets analysis subtract the baseline
+    (``net_mj = total_mj - idle_mw * duration_s``).
+    """
+    if not NvmlPowerBackend.available(device_index):
+        return None
+    import pynvml
+
+    pynvml.nvmlInit()
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+    samples: list[float] = []
+    deadline = time.perf_counter() + duration_s
+    while time.perf_counter() < deadline:
+        samples.append(float(pynvml.nvmlDeviceGetPowerUsage(handle)))
+        time.sleep(max(interval_ms, 1) / 1000.0)
+    return sum(samples) / len(samples) if samples else None
+
+
 class EnergyMeter:
     """Aggregate several backends behind one start/stop pair."""
 

@@ -4,7 +4,9 @@ Normalization follows the official VQAv2 evaluation code: lowercase, strip
 articles and most punctuation, digitise number words, expand contraction
 typos. ``vqa_accuracy`` implements the standard min(matches / 3, 1) score
 against the annotator answers; ``exact_match`` is the stricter single-answer
-variant used for datasets with one gold answer.
+variant used for datasets with one gold answer. ``anls`` is the edit-distance
+score used officially by DocVQA, where long transcribed strings should not be
+penalised to zero by a single character.
 """
 
 import re
@@ -63,6 +65,55 @@ def exact_match(prediction: str, gold_answers: list[str] | tuple[str, ...]) -> b
     """True when the normalized prediction equals any normalized gold answer."""
     normalized = normalize_answer(prediction)
     return any(normalized == normalize_answer(gold) for gold in gold_answers)
+
+
+def _levenshtein(left: str, right: str) -> int:
+    """Edit distance between two strings (iterative, O(min) memory)."""
+    if len(left) < len(right):
+        left, right = right, left
+    if not right:
+        return len(left)
+
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        for j, right_char in enumerate(right, start=1):
+            current.append(
+                min(
+                    previous[j] + 1,               # deletion
+                    current[j - 1] + 1,            # insertion
+                    previous[j - 1] + (left_char != right_char),  # substitution
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def anls(
+    prediction: str,
+    gold_answers: list[str] | tuple[str, ...],
+    *,
+    threshold: float = 0.5,
+) -> float:
+    """Average Normalized Levenshtein Similarity, the official DocVQA metric.
+
+    Returns the best similarity ``1 - dist / max(len)`` over the gold answers,
+    zeroed when it falls below ``threshold`` so that near-misses earn partial
+    credit but unrelated answers earn none.
+    """
+    if not gold_answers:
+        return 0.0
+    normalized = normalize_answer(prediction)
+    best = 0.0
+    for gold in gold_answers:
+        gold_normalized = normalize_answer(gold)
+        longest = max(len(normalized), len(gold_normalized))
+        if longest == 0:
+            similarity = 1.0
+        else:
+            similarity = 1.0 - _levenshtein(normalized, gold_normalized) / longest
+        best = max(best, similarity)
+    return best if best >= threshold else 0.0
 
 
 def vqa_accuracy(prediction: str, gold_answers: list[str] | tuple[str, ...]) -> float:

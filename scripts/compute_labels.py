@@ -7,9 +7,10 @@ import argparse
 from collections import Counter
 
 from gwel.config import load_config
+from gwel.data.scoring import ScoringPolicy, rescore_records
 from gwel.oracle.cost import CostWeights
 from gwel.oracle.label import derive_labels, write_labels
-from gwel.oracle.records import read_records
+from gwel.oracle.records import deduplicate_records, read_records
 
 
 def main() -> None:
@@ -17,10 +18,24 @@ def main() -> None:
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--records", default=None, help="override the records input path")
     parser.add_argument("--out", default=None, help="override the labels output path")
+    parser.add_argument(
+        "--metric",
+        choices=("per-dataset", "vqa"),
+        default="per-dataset",
+        help="per-dataset uses ANLS for DocVQA and exact match for V*Bench",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
-    records = read_records(args.records or config.paths.records)
+    raw_records = read_records(args.records or config.paths.records)
+    records = deduplicate_records(raw_records)
+    if len(records) < len(raw_records):
+        print(f"dropped {len(raw_records) - len(records)} stale duplicate records")
+
+    policy = (
+        ScoringPolicy() if args.metric == "per-dataset" else ScoringPolicy(dataset_metrics={})
+    )
+    records = rescore_records(records, policy)
     weights = CostWeights.from_config(config.cost)
     labels = derive_labels(records, weights=weights)
     out_path = args.out or config.paths.labels

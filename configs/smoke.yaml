@@ -25,6 +25,9 @@ runner:
   ocr:
     backend: pytesseract
     source: full
+    source_longest_side: 768
+    regions: true
+    region_longest_side: 768
     preview_size: 256
   repeats: 1
   warmup: 0
@@ -40,10 +43,10 @@ profiling:
 
 cost:
   error_weight: 1.0
-  lambda_latency_per_ms: 0.0005
-  lambda_energy_per_mj: 0.0002
+  lambda_latency_per_ms: 0.00005   # 600 ms pass ~ 0.03
+  lambda_energy_per_mj: 0.000002   # 30 J net ~ 0.06
   lambda_memory_per_mb: 0.0
-  lambda_visual_tokens: 0.002
+  lambda_visual_tokens: 0.0001     # 922 tokens ~ 0.09
 
 router:
   feature_config_id: lowres_256

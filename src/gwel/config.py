@@ -41,14 +41,27 @@ class CropConfig:
 
 @dataclass(frozen=True)
 class OcrConfig:
+    """OCR action settings.
+
+    ``source_longest_side`` caps the image handed to the OCR engine: on the
+    pilot, 768 px costs 178 ms against 260 ms at full resolution while still
+    recovering ~90% of the characters, so the cap trades little accuracy for
+    a materially cheaper action.
+    """
+
     backend: str = "pytesseract"
     source: str = "full"
+    source_longest_side: int | None = None
     preview_size: int = 256
+    regions: bool = True
+    region_longest_side: int = 768
 
 
 @dataclass(frozen=True)
 class RunnerConfig:
-    lowres_sizes: tuple[int, ...] = (256, 384)
+    # Idefics3 quantises to a patch grid, so 256 and 384 px both cost 64
+    # visual tokens; the ladder below is the one that actually varies cost.
+    lowres_sizes: tuple[int, ...] = (384, 768)
     full_longest_side: int = 1536
     crop: CropConfig = field(default_factory=CropConfig)
     ocr: OcrConfig = field(default_factory=OcrConfig)
@@ -69,22 +82,30 @@ class ProfilingConfig:
 
 @dataclass(frozen=True)
 class CostConfig:
+    """Cost weights calibrated so the error term dominates resource terms.
+
+    With a ~600 ms / ~30 J-net / ~900-token pass, each resource term stays
+    around 0.03-0.09 against an error weight of 1.0: the oracle first requires
+    correctness, then discriminates on measured cost.
+    """
+
     error_weight: float = 1.0
-    lambda_latency_per_ms: float = 0.0005
-    lambda_energy_per_mj: float = 0.0002
+    lambda_latency_per_ms: float = 0.00005
+    lambda_energy_per_mj: float = 0.000002
     lambda_memory_per_mb: float = 0.0
-    lambda_visual_tokens: float = 0.002
+    lambda_visual_tokens: float = 0.0001
 
 
 @dataclass(frozen=True)
 class RouterConfig:
-    feature_config_id: str = "lowres_256"
+    feature_config_id: str = "lowres_384"
     hidden_dims: tuple[int, ...] = (128, 64)
     dropout: float = 0.1
     lr: float = 1e-3
     epochs: int = 60
     batch_size: int = 64
     val_fraction: float = 0.2
+    test_fraction: float = 0.2  # held out from training and model selection
     seed: int = 1234
 
 

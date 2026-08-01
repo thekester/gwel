@@ -2,9 +2,11 @@
 
 from .imaging import CropBox, crop_grid, downscale, extract_crop
 from .ocr import LazyOcrEngine, OcrResult
+from .perturbations import BorderPerturbation
 from .signals import ConfidenceSignals, entropy_from_logits, signals_from_scores, top2_margin_from_logits
 
 __all__ = [
+    "BorderPerturbation",
     "ConfidenceSignals",
     "CropBox",
     "LazyOcrEngine",

@@ -1,0 +1,73 @@
+# Balanced 200-example pilot across the four question regimes.
+# The smallest size where the router's accuracy/cost trade-off can be
+# read with any confidence. Derived from configs/pilot20.yaml.
+
+model:
+  model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/pilot200
+  pilot_manifest: data/processed/pilot200/manifest.jsonl
+  records: results/runs/pilot200_records.jsonl
+  labels: results/runs/pilot200_labels.jsonl
+  router_dir: results/router-pilot200
+
+runner:
+  lowres_sizes: [384, 768]
+  full_longest_side: 1536
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: true
+    region_longest_side: 768
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 3
+  hardware_warmup: 1
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005   # 600 ms pass ~ 0.03
+  lambda_energy_per_mj: 0.000002   # 30 J net ~ 0.06
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001     # 922 tokens ~ 0.09
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 80
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 2000
+  image_dir: data/processed/pilot200/images
+  per_dataset:
+    vqav2: 60
+    textvqa: 50
+    docvqa: 60
+    vstar: 30

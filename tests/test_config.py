@@ -6,7 +6,7 @@ from gwel.config import GwelConfig, load_config
 def test_default_config_file_loads(tmp_path) -> None:
     config = load_config("configs/default.yaml")
     assert config.model.model_id == "HuggingFaceTB/SmolVLM-500M-Instruct"
-    assert config.runner.lowres_sizes == (256, 384)
+    assert config.runner.lowres_sizes == (384, 768)
     assert config.runner.crop.rows == 2
     assert config.cost.error_weight == 1.0
 

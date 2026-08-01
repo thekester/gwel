@@ -17,7 +17,7 @@ paths:
   router_dir: results/router
 
 runner:
-  lowres_sizes: [256, 384]     # longest-side pixels for the low-res previews
+  lowres_sizes: [384, 768]     # longest-side pixels for the low-res previews
   full_longest_side: 1536      # cap for the full-resolution pass
   crop:
     rows: 2
@@ -28,6 +28,9 @@ runner:
   ocr:
     backend: pytesseract       # pytesseract | easyocr
     source: full               # full | lowres  (image the OCR runs on)
+    source_longest_side: 768   # cap: 178 ms vs 260 ms at full res, ~90% of chars
+    regions: true              # also OCR each crop cell (preview + region transcript)
+    region_longest_side: 768
     preview_size: 256
   repeats: 1                   # generations per (example, config); >1 enables latency stats
   warmup: 0
@@ -43,13 +46,13 @@ profiling:
 
 cost:
   error_weight: 1.0
-  lambda_latency_per_ms: 0.0005
-  lambda_energy_per_mj: 0.0002
+  lambda_latency_per_ms: 0.00005   # 600 ms pass ~ 0.03
+  lambda_energy_per_mj: 0.000002   # 30 J net ~ 0.06
   lambda_memory_per_mb: 0.0
-  lambda_visual_tokens: 0.002
+  lambda_visual_tokens: 0.0001     # 922 tokens ~ 0.09
 
 router:
-  feature_config_id: lowres_256   # ANSWER_LOW pass whose signals feed the router
+  feature_config_id: lowres_384   # ANSWER_LOW pass whose signals feed the router
   hidden_dims: [128, 64]
   dropout: 0.1
   lr: 0.001

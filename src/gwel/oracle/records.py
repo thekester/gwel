@@ -102,6 +102,24 @@ class RunRecord:
         return self.energy_mj.get("total")
 
     @property
+    def net_energy_mj(self) -> float | None:
+        """Energy above the idle GPU baseline, when one was measured.
+
+        Falls back to the raw total when no ``idle_power_mw`` is in ``meta``.
+        Clamped at zero: sampling noise can push the subtraction negative.
+        """
+        total = self.total_energy_mj
+        if total is None:
+            return None
+        idle_mw = self.meta.get("idle_power_mw")
+        if not isinstance(idle_mw, (int, float)):
+            return total
+        window_ms = self.meta.get("energy_window_ms", self.latency_ms)
+        if not isinstance(window_ms, (int, float)):
+            window_ms = self.latency_ms
+        return max(total - float(idle_mw) * float(window_ms) / 1000.0, 0.0)
+
+    @property
     def key(self) -> tuple[str, str]:
         """Resume key identifying this record within a run file."""
         return (self.example_id, self.config_id)
@@ -128,6 +146,19 @@ def read_records(path: str | Path) -> list[RunRecord]:
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 raise ValueError(f"invalid run record at line {line_number} of {path}") from error
     return records
+
+
+def deduplicate_records(records: Iterable[RunRecord]) -> list[RunRecord]:
+    """Keep the last record per (example_id, config_id), preserving order.
+
+    Runs append incrementally, so a run relaunched without seeing the previous
+    output file appends a second measurement of the same key. The most recent
+    one reflects the current code and configuration, so it wins.
+    """
+    latest: dict[tuple[str, str], RunRecord] = {}
+    for record in records:
+        latest[record.key] = record
+    return list(latest.values())
 
 
 def load_done_keys(path: str | Path) -> set[tuple[str, str]]:

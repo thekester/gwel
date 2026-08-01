@@ -17,6 +17,7 @@ from ..config import RouterConfig
 from ..oracle.label import OracleLabel
 from ..oracle.records import RunRecord
 from .features import build_feature_matrix
+from .splits import make_split
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,10 @@ class TrainResult:
 
     n_train: int
     n_val: int
+    n_test: int
     train_accuracy: float
     val_accuracy: float
+    test_accuracy: float  # scored once, after model selection finished
     val_accuracy_per_action: dict[str, float]
     checkpoint_dir: str
 
@@ -76,7 +79,11 @@ def build_routing_dataset(
         dataset_names.append(label.dataset)
 
     if not kept_records:
-        raise ValueError("no trainable examples: check feature_config_id and labels")
+        available = sorted({record.config_id for record in records})
+        raise ValueError(
+            f"no trainable examples: feature_config_id={feature_config_id!r} matched no "
+            f"record. Available config ids: {available}"
+        )
 
     return RoutingDataset(
         features=build_feature_matrix(kept_records),
@@ -91,15 +98,29 @@ def split_by_example(
     *,
     val_fraction: float,
     seed: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return (train_indices, val_indices), shuffled with a fixed seed."""
-    if not 0.0 < val_fraction < 1.0:
-        raise ValueError("val_fraction must be in (0, 1)")
-    n = len(dataset.targets)
-    rng = np.random.default_rng(seed)
-    permutation = rng.permutation(n)
-    n_val = max(1, int(round(n * val_fraction)))
-    return permutation[n_val:], permutation[:n_val]
+    test_fraction: float = 0.2,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (train, val, test) index arrays from the shared stratified split.
+
+    Delegating to :func:`gwel.router.splits.make_split` keeps the folds
+    identical across training and evaluation, so the test fold stays untouched
+    by model selection.
+    """
+    split = make_split(
+        dataset.example_ids,
+        dataset.datasets,
+        val_fraction=val_fraction,
+        test_fraction=test_fraction,
+        seed=seed,
+    )
+    folds = {"train": [], "val": [], "test": []}
+    for index, example_id in enumerate(dataset.example_ids):
+        folds[split.fold_of(example_id)].append(index)
+    return (
+        np.asarray(folds["train"], dtype=np.int64),
+        np.asarray(folds["val"], dtype=np.int64),
+        np.asarray(folds["test"], dtype=np.int64),
+    )
 
 
 def train_router(
@@ -115,9 +136,17 @@ def train_router(
     from .model import ACTIONS, RouterCheckpoint, RouterMLP
 
     torch.manual_seed(config.seed)
-    train_idx, val_idx = split_by_example(
-        dataset, val_fraction=config.val_fraction, seed=config.seed
+    train_idx, val_idx, test_idx = split_by_example(
+        dataset,
+        val_fraction=config.val_fraction,
+        seed=config.seed,
+        test_fraction=config.test_fraction,
     )
+    if len(train_idx) == 0 or len(val_idx) == 0:
+        raise ValueError(
+            f"split left an empty fold (train={len(train_idx)}, val={len(val_idx)}, "
+            f"test={len(test_idx)}); the labelled set is too small for these fractions"
+        )
 
     mean = dataset.features[train_idx].mean(axis=0)
     std = dataset.features[train_idx].std(axis=0)
@@ -182,8 +211,12 @@ def train_router(
     return TrainResult(
         n_train=len(train_idx),
         n_val=len(val_idx),
+        n_test=len(test_idx),
         train_accuracy=accuracy(train_features, train_targets),
         val_accuracy=best_val,
+        test_accuracy=(
+            accuracy(features[test_idx], targets[test_idx]) if len(test_idx) else float("nan")
+        ),
         val_accuracy_per_action=per_action,
         checkpoint_dir=str(out_dir),
     )

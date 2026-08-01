@@ -15,10 +15,10 @@ class CostWeights:
     """Relative price of each measured resource, in cost units per unit."""
 
     error_weight: float = 1.0
-    lambda_latency_per_ms: float = 0.0005
-    lambda_energy_per_mj: float = 0.0002
+    lambda_latency_per_ms: float = 0.00005
+    lambda_energy_per_mj: float = 0.000002
     lambda_memory_per_mb: float = 0.0
-    lambda_visual_tokens: float = 0.002
+    lambda_visual_tokens: float = 0.0001
 
     @classmethod
     def from_config(cls, config: CostConfig) -> "CostWeights":

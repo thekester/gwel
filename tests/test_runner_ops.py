@@ -12,7 +12,7 @@ def test_prepare_ops_covers_all_configurations() -> None:
     ids = [op.config_id for op in ops]
 
     assert ids[0] == "no_image"
-    assert "lowres_256" in ids and "lowres_384" in ids
+    assert "lowres_384" in ids and "lowres_768" in ids
     assert "full" in ids
     assert sum(1 for i in ids if i.startswith("crop_")) == 4  # 2x2 grid
     assert len(ids) == len(set(ids))
@@ -23,13 +23,17 @@ def test_planned_ids_include_tool_ops_without_running_them() -> None:
 
     assert ids == (
         "no_image",
-        "lowres_256",
         "lowres_384",
+        "lowres_768",
         "full",
         "crop_r0c0",
         "crop_r0c1",
         "crop_r1c0",
         "crop_r1c1",
+        "ocr_r0c0",
+        "ocr_r0c1",
+        "ocr_r1c0",
+        "ocr_r1c1",
         "ocr_full",
     )
 
@@ -40,8 +44,8 @@ def test_prepare_ops_actions_and_images() -> None:
 
     assert by_id["no_image"].action is None and by_id["no_image"].images == ()
     assert by_id["full"].action is None
-    assert by_id["lowres_256"].action is Action.ANSWER_LOW
-    assert max(by_id["lowres_256"].images[0].size) == 256
+    assert by_id["lowres_384"].action is Action.ANSWER_LOW
+    assert max(by_id["lowres_384"].images[0].size) == 384
     crop = by_id["crop_r0c0"]
     assert crop.action is Action.CROP
     assert len(crop.images) == 2  # preview + crop

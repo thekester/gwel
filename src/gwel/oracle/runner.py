@@ -14,6 +14,7 @@ incrementally so interrupted runs resume where they stopped.
 """
 
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -25,7 +26,7 @@ from ..data.loaders import PilotExample
 from ..data.vqa_metrics import exact_match, vqa_accuracy
 from ..modeling.imaging import crop_grid, downscale, extract_crop
 from ..modeling.ocr import LazyOcrEngine
-from ..profiling.energy import EnergyMeter, build_energy_meter
+from ..profiling.energy import EnergyMeter, build_energy_meter, sample_idle_power_mw
 from ..profiling.memory import track_memory
 from ..profiling.stats import summarize_repeats
 from .records import RunRecord, append_records, load_done_keys
@@ -42,6 +43,7 @@ class PreparedOp:
     images: tuple[Image.Image, ...]
     context_text: str | None = None
     tool_ms: float = 0.0  # non-model overhead (e.g. OCR) added to latency
+    ocr_image: Image.Image | None = None
     meta: dict[str, object] = field(default_factory=dict)
 
 
@@ -97,23 +99,49 @@ def prepare_ops(
             )
         )
 
+    if ocr_engine is not None and runner.ocr.regions:
+        # OCR on one grid cell: the preview carries the layout while the
+        # transcript carries the text, so the pass costs preview-level visual
+        # tokens instead of the high-res tokens a CROP would spend.
+        ocr_cfg = runner.ocr
+        for index, box in enumerate(boxes):
+            row, col = divmod(index, crop_cfg.cols)
+            ops.append(
+                PreparedOp(
+                    config_id=f"ocr_r{row}c{col}",
+                    action=Action.OCR,
+                    images=(preview,),
+                    ocr_image=extract_crop(
+                        image, box, longest_side=ocr_cfg.region_longest_side
+                    ),
+                    meta={
+                        **base_meta,
+                        "ocr_backend": ocr_engine.backend,
+                        "box": box.to_dict(),
+                        "ocr_source_size": ocr_cfg.region_longest_side,
+                        "preview_size": ocr_cfg.preview_size,
+                    },
+                )
+            )
+
     if ocr_engine is not None:
         ocr_cfg = runner.ocr
-        source = image if ocr_cfg.source == "full" else downscale(image, max(runner.lowres_sizes))
-        result = ocr_engine.extract(source)
+        if ocr_cfg.source_longest_side is not None:
+            source = downscale(image, ocr_cfg.source_longest_side)
+        elif ocr_cfg.source == "full":
+            source = image
+        else:
+            source = downscale(image, max(runner.lowres_sizes))
         ops.append(
             PreparedOp(
                 config_id=f"ocr_{ocr_cfg.source}",
                 action=Action.OCR,
                 images=(downscale(image, ocr_cfg.preview_size),),
-                context_text=result.text or "(no text found)",
-                tool_ms=result.ocr_ms + (result.load_ms or 0.0),
+                ocr_image=source,
                 meta={
                     **base_meta,
                     "ocr_backend": ocr_engine.backend,
-                    "ocr_ms": result.ocr_ms,
-                    "ocr_load_ms": result.load_ms,
-                    "ocr_chars": len(result.text),
+                    "ocr_source_size": max(source.size),
                     "preview_size": ocr_cfg.preview_size,
                 },
             )
@@ -135,6 +163,12 @@ def planned_config_ids(config: GwelConfig) -> tuple[str, ...]:
         for row in range(runner.crop.rows)
         for col in range(runner.crop.cols)
     )
+    if runner.ocr.regions:
+        ids.extend(
+            f"ocr_r{row}c{col}"
+            for row in range(runner.crop.rows)
+            for col in range(runner.crop.cols)
+        )
     ids.append(f"ocr_{runner.ocr.source}")
     return tuple(ids)
 
@@ -162,6 +196,7 @@ class OracleRunner:
             sample_interval_ms=config.profiling.sample_interval_ms,
             nvml_device_index=config.profiling.nvml_device_index,
         )
+        self.idle_power_mw: float | None = None
 
     def run_op(self, example: PilotExample, op: PreparedOp) -> RunRecord:
         """Run one configuration with full instrumentation."""
@@ -170,20 +205,36 @@ class OracleRunner:
 
         outputs = []
         latencies: list[float] = []
+        tool_latencies: list[float] = []
+        ocr_load_ms: float | None = None
+        ocr_chars = 0
         with track_memory(sample_interval_ms=self.config.profiling.sample_interval_ms) as tracker:
             self.energy_meter.start()
+            energy_start = time.perf_counter()
             for index in range(warmup + repeats):
+                context_text = op.context_text
+                tool_ms = op.tool_ms
+                if op.ocr_image is not None:
+                    ocr_result = self.ocr_engine.extract(op.ocr_image)
+                    context_text = ocr_result.text or "(no text found)"
+                    tool_ms += ocr_result.ocr_ms + (ocr_result.load_ms or 0.0)
+                    if ocr_load_ms is None and ocr_result.load_ms is not None:
+                        ocr_load_ms = ocr_result.load_ms
+                    ocr_chars = len(ocr_result.text)
                 output = self.engine.generate(
-                    op.images or None, example.question, context_text=op.context_text
+                    op.images or None, example.question, context_text=context_text
                 )
                 if index >= warmup:
                     outputs.append(output)
-                    latencies.append(output.generate_ms)
+                    latencies.append(output.generate_ms + tool_ms)
+                    tool_latencies.append(tool_ms)
             energy = self.energy_meter.stop()
+            energy_window_ms = (time.perf_counter() - energy_start) * 1000.0
 
         # Energy was integrated over all generations; report the per-call mean.
         calls = warmup + repeats
         energy = {name: (value / calls if value is not None else None) for name, value in energy.items()}
+        energy_window_ms /= calls
 
         output = outputs[-1]
         stats = summarize_repeats(latencies)
@@ -202,7 +253,7 @@ class OracleRunner:
             exact_match=match,
             vqa_score=score,
             correct=match or score >= 0.5,
-            latency_ms=stats.median + op.tool_ms,
+            latency_ms=stats.median,
             latency_stats=stats.to_dict() if repeats > 1 else None,
             ttft_ms=output.ttft_ms,
             ram_peak_mb=report.ram_peak_mb if report else None,
@@ -212,7 +263,22 @@ class OracleRunner:
             prompt_tokens=output.prompt_tokens,
             generated_tokens=output.generated_tokens,
             signals=output.signals.to_dict(),
-            meta={**op.meta, "tool_ms": op.tool_ms, "repeats": repeats, "warmup": warmup},
+            meta={
+                **op.meta,
+                "tool_ms": sum(tool_latencies) / len(tool_latencies),
+                "repeats": repeats,
+                "warmup": warmup,
+                "energy_window_ms": energy_window_ms,
+                **(
+                    {
+                        "ocr_load_ms": ocr_load_ms,
+                        "ocr_chars": ocr_chars,
+                    }
+                    if op.ocr_image is not None
+                    else {}
+                ),
+                **({"idle_power_mw": self.idle_power_mw} if self.idle_power_mw is not None else {}),
+            },
         )
 
     def run(self, examples: Sequence[PilotExample], out_path: str) -> dict[str, int]:
@@ -224,6 +290,12 @@ class OracleRunner:
         done = load_done_keys(out_path)
         counters = {"examples": 0, "written": 0, "skipped": 0, "failed": 0}
         config_ids = planned_config_ids(self.config)
+        if "nvml" in self.energy_meter.backend_names and self.idle_power_mw is None:
+            self.idle_power_mw = sample_idle_power_mw(
+                self.config.profiling.nvml_device_index
+            )
+            if self.idle_power_mw is not None:
+                logger.info("idle GPU power baseline: %.0f mW", self.idle_power_mw)
         ensure_loaded = getattr(self.engine, "ensure_loaded", None)
         model_prepared = False
 
