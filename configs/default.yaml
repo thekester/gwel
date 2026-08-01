@@ -1,0 +1,68 @@
+# Default pipeline configuration for the Gwel pilot.
+# All paths are relative to the project root unless absolute.
+
+model:
+  model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: auto            # auto | cuda | cpu
+  dtype: bfloat16         # bfloat16 | float16 | float32
+  max_new_tokens: 32
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/pilot
+  pilot_manifest: data/processed/pilot/manifest.jsonl
+  records: results/runs/pilot_records.jsonl
+  labels: results/runs/pilot_labels.jsonl
+  router_dir: results/router
+
+runner:
+  lowres_sizes: [256, 384]     # longest-side pixels for the low-res previews
+  full_longest_side: 1536      # cap for the full-resolution pass
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2               # fraction of cell size shared between neighbours
+    longest_side: 512          # each crop is resized to this longest side
+    preview_size: 256          # low-res preview shown alongside the crop
+  ocr:
+    backend: pytesseract       # pytesseract | easyocr
+    source: full               # full | lowres  (image the OCR runs on)
+    preview_size: 256
+  repeats: 1                   # generations per (example, config); >1 enables latency stats
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  energy_backends: auto        # auto | [rapl, nvml] | []
+  sample_interval_ms: 20       # power / RSS sampling period
+  nvml_device_index: 0
+  hardware_repeats: 5          # used by scripts/profile_hardware-style deep measurements
+  hardware_warmup: 2
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.0005
+  lambda_energy_per_mj: 0.0002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.002
+
+router:
+  feature_config_id: lowres_256   # ANSWER_LOW pass whose signals feed the router
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 60
+  batch_size: 64
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  image_dir: data/processed/pilot/images
+  per_dataset:
+    vqav2: 250
+    textvqa: 250
+    docvqa: 250
+    vstar: 100

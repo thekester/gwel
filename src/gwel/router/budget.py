@@ -1,24 +1,18 @@
-"""Small, dependency-free baseline router.
+"""Hard-budget baseline: pick the best action that fits explicit budgets.
 
-The baseline only reasons about predicted utility and measured cost. Model and
-dataset integrations can build richer profiles around these primitives later.
+This rule-based router serves as a floor for the learned policy: it ignores
+the query content entirely and only filters measured action profiles by the
+supplied resource budgets.
 """
 
 from dataclasses import dataclass
-from enum import StrEnum
 
-
-class Action(StrEnum):
-    """Visual actions available to the baseline policy."""
-
-    LOW_RES = "low_res"
-    CROP = "crop"
-    OCR = "ocr"
+from ..actions import Action
 
 
 @dataclass(frozen=True)
 class ActionProfile:
-    """Estimated utility and resource cost for one action."""
+    """Estimated utility and typical resource cost for one action."""
 
     action: Action
     utility: float
@@ -37,7 +31,7 @@ class ActionProfile:
 
 @dataclass(frozen=True)
 class RoutingDecision:
-    """Selected action and the profiles considered by the router."""
+    """Selected action and the profiles that fit the budgets."""
 
     action: Action
     candidates: tuple[ActionProfile, ...]
@@ -61,14 +55,9 @@ class BudgetRouter:
         candidates = tuple(
             profile
             for profile in self._profiles
-            if profile.fits(
-                latency_ms=latency_ms,
-                memory_mb=memory_mb,
-                energy_mj=energy_mj,
-            )
+            if profile.fits(latency_ms=latency_ms, memory_mb=memory_mb, energy_mj=energy_mj)
         )
         if not candidates:
             raise ValueError("no action fits the supplied resource budgets")
-
         selected = max(candidates, key=lambda profile: profile.utility)
         return RoutingDecision(action=selected.action, candidates=candidates)

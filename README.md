@@ -7,18 +7,40 @@ Gwel picks the cheapest visual action per query: answer from low-res, request a 
 ## Development
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]"        # core (numpy, pillow, psutil, pyyaml) + pytest
+python -m pip install -e ".[model,gpu]"  # torch, transformers>=4.49, pynvml for real runs
+python -m pip install -e ".[data,ocr]"   # datasets streaming, pytesseract
 pytest
 ```
 
-The current package contains a dependency-free routing baseline and an offline
-oracle labeler. The labeler selects the cheapest measured action that produced
-a correct answer, which is the first step toward a supervised routing dataset.
-It also includes aggregate evaluation metrics for accuracy, resource costs,
-escalation rate, and oracle gap. Model, dataset, and device-specific
-integrations will be added as the benchmark protocol is validated. Raw
-measurements can be stored as JSONL with `write_jsonl` and loaded again with
-`read_jsonl`.
+## Pipeline
+
+Every step reads `configs/default.yaml` and writes replayable JSONL, so the
+pipeline can be re-run stage by stage:
+
+```bash
+python scripts/build_pilot.py        # sample the pilot mixture, write manifest + images
+python scripts/run_oracle.py         # run all visual configs per example, log records
+python scripts/compute_labels.py     # derive the cheapest-correct-action oracle labels
+python scripts/train_router.py       # distill oracle labels into the MLP router
+python scripts/measure_coldstart.py  # cold vs warm tool-loading costs
+```
+
+Per example the oracle runner measures: blind baseline, low-res previews at
+several sizes (ANSWER_LOW), capped full resolution (diagnostic), preview + one
+high-res crop per grid cell (CROP), and preview + OCR transcript (OCR). Each
+pass logs the answer, VQA-normalized correctness, confidence signals (mean
+log-prob, entropy, top-1/top-2 margin), visual-token counts, latency
+(median/IQR/p95 + time-to-first-token), peak RAM/VRAM, and energy (RAPL on
+Linux CPUs, NVML power integration on NVIDIA GPUs).
+
+Package layout:
+
+- `gwel/profiling/` — latency, memory, energy backends, cold-start measurement
+- `gwel/modeling/` — SmolVLM engine, confidence signals, lazy OCR, image ops
+- `gwel/oracle/` — multi-config runner, cost function J, oracle labeling
+- `gwel/router/` — features, MLP distillation, risk–coverage and Pareto evaluation
+- `gwel/data/` — pilot dataset builders and VQA answer metrics
 
 ## Citation
 
