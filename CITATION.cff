@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Gwel"
+authors:
+  - family-names: Avenel
+    given-names: Theophile
+year: 2026
+license: MIT
+url: "https://github.com/thekester/gwel"
