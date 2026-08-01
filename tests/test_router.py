@@ -2,12 +2,15 @@ from gwel import (
     Action,
     ActionMeasurement,
     ActionProfile,
+    BenchmarkExample,
     BudgetRouter,
     CostWeights,
     PolicyResult,
     label_minimal_action,
     oracle_gap,
+    read_jsonl,
     summarize,
+    write_jsonl,
 )
 
 
@@ -87,3 +90,17 @@ def test_oracle_gap_requires_aligned_inputs() -> None:
         assert "same length" in str(error)
     else:
         raise AssertionError("expected mismatched inputs to raise ValueError")
+
+
+def test_benchmark_jsonl_round_trip(tmp_path) -> None:
+    example = BenchmarkExample(
+        example_id="demo-1",
+        question="What color is the sign?",
+        category="fine_detail",
+        measurements=(ActionMeasurement(Action.CROP, True, 35, 450, 10, 96),),
+    )
+    path = tmp_path / "pilot.jsonl"
+
+    write_jsonl(path, [example])
+
+    assert read_jsonl(path) == [example]
