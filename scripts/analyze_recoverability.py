@@ -1,7 +1,7 @@
 """Separate the three routing questions and test which signals answer them.
 
-The escalation literature conditions on Q1 — is the cheap pass sufficient? —
-but the decision that spends budget is Q2: given it failed, will escalating
+The escalation literature conditions on Q1 (is the cheap pass sufficient?) but
+the decision that spends budget is Q2: given it failed, will escalating
 recover the answer? Q3 asks whether any action can. These are distinct labels
 over the same examples, and a signal that answers one need not answer another.
 

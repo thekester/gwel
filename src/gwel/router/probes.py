@@ -8,8 +8,8 @@ al. (2602.09924) train supervised linear probes on the same activations;
 NVIDIA's LLM Router (2603.20895) selects layers by Fisher separability.
 
 What is new here is the *target*. Every probe above predicts whether a model
-will succeed. We also fit probes for whether an intervention — more pixels —
-will change the outcome, which is the quantity that actually spends budget.
+will succeed. We also fit probes for whether an intervention, more pixels, will change
+the outcome, which is the quantity that actually spends budget.
 """
 
 from dataclasses import dataclass

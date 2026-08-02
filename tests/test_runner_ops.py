@@ -62,3 +62,46 @@ def test_budget_router_picks_best_fitting_action() -> None:
     )
     decision = router.route(latency_ms=60, memory_mb=600, energy_mj=15)
     assert decision.action is Action.CROP
+
+
+def _resolution_only() -> GwelConfig:
+    """A config that studies the resolution ladder and nothing else."""
+    from dataclasses import replace
+
+    base = GwelConfig()
+    return replace(
+        base, runner=replace(base.runner, include_crop=False, include_ocr=False)
+    )
+
+
+def test_disabling_crop_and_ocr_leaves_only_the_resolution_ladder() -> None:
+    image = Image.new("RGB", (800, 600))
+    ids = [op.config_id for op in prepare_ops(image, _resolution_only(), ocr_engine=None)]
+
+    assert ids == ["no_image", "lowres_384", "lowres_768", "full"]
+
+
+def test_planned_ids_agree_with_prepared_ops_when_tools_are_disabled() -> None:
+    """The planner must not promise configurations the runner will not build."""
+    image = Image.new("RGB", (800, 600))
+    config = _resolution_only()
+    prepared = tuple(op.config_id for op in prepare_ops(image, config, ocr_engine=None))
+
+    assert planned_config_ids(config) == prepared
+
+
+def test_disabling_ocr_alone_keeps_the_crops() -> None:
+    from dataclasses import replace
+
+    base = GwelConfig()
+    config = replace(base, runner=replace(base.runner, include_ocr=False))
+    ids = planned_config_ids(config)
+
+    assert sum(1 for i in ids if i.startswith("crop_")) == 4
+    assert not any(i.startswith("ocr_") for i in ids)
+
+
+def test_tools_are_enabled_by_default_so_existing_configs_are_unchanged() -> None:
+    base = GwelConfig()
+    assert base.runner.include_crop and base.runner.include_ocr
+    assert len(planned_config_ids(base)) == 13

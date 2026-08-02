@@ -58,8 +58,8 @@ def lower_bound(successes: int, trials: int, *, alpha: float = 0.05) -> float:
     """Exact one-sided Clopper-Pearson lower bound on a binomial proportion.
 
     No normal approximation, so the bound stays valid at the small counts a
-    calibration split provides. Uses scipy's Beta quantile when available and
-    falls back to bisection otherwise.
+    calibration split provides. Uses scipy's Beta quantile when available
+    and falls back to bisection otherwise.
     """
     if trials < 0 or successes < 0 or successes > trials:
         raise ValueError("require 0 <= successes <= trials")
@@ -111,9 +111,9 @@ def fit_recall_controlled(
     """Highest threshold whose certified recall on recoverable queries meets the target.
 
     ``scores`` should increase with uncertainty, so escalating means
-    ``score >= threshold``. Raising the threshold escalates fewer queries and
-    saves more, so the search takes the largest threshold that still clears the
-    Clopper-Pearson floor — maximum saving subject to the guarantee.
+    ``score >= threshold``. Raising the threshold escalates fewer queries
+    and saves more, so the search takes the largest threshold that still clears the
+    Clopper-Pearson floor, maximum saving subject to the guarantee.
     """
     scores = np.asarray(scores, dtype=np.float64)
     recoverable = np.asarray(recoverable, dtype=bool)

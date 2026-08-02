@@ -46,9 +46,9 @@ class ComponentTiming:
 
     Following the profiling decomposition of Shin et al. (arXiv 2607.08029),
     who separate vision encoder, projector and LLM cost with explicit CUDA
-    synchronisation. Subtracting a text-only pass from an image pass — which is
-    how we previously estimated the visual share — conflates all three, and
-    they scale differently: encoder with pixels, projector with patches, LLM
+    synchronisation. Subtracting a text-only pass from an image pass, which is
+    how we previously estimated the visual share, conflates all three,
+    and they scale differently: encoder with pixels, projector with patches, LLM
     attention with sequence length.
     """
 
@@ -280,6 +280,78 @@ class SmolVlmEngine:
         return np.stack(
             [state[0, position, :].float().cpu().numpy() for state in outputs.hidden_states]
         )
+
+    def extract_visual_grids(
+        self,
+        image: Image.Image,
+        question: str,
+        layers: Sequence[int],
+    ) -> np.ndarray:
+        """Visual-token grids at several layers from one forward pass.
+
+        Returns ``(len(layers), side, side, hidden)``. Sweeping depth costs no
+        extra passes because the forward already produces every hidden state.
+        """
+        self.ensure_loaded()
+
+        import torch
+
+        prompt = self._build_prompt(1, question, None)
+        inputs = self._prepare_inputs(prompt, [image])
+        ids = inputs["input_ids"][0]
+        if self._image_token_id is None or self._image_token_id < 0:
+            raise RuntimeError("this checkpoint has no identifiable image token")
+        positions = (ids == self._image_token_id).nonzero().flatten()
+        count = int(positions.numel())
+        side = int(round(count**0.5))
+        if side * side != count:
+            raise RuntimeError(f"{count} visual tokens do not form a square grid")
+
+        with torch.inference_mode():
+            outputs = self._model(**inputs, output_hidden_states=True)
+        return np.stack([
+            outputs.hidden_states[layer][0, positions, :].float().cpu().numpy().reshape(
+                side, side, -1
+            )
+            for layer in layers
+        ])
+
+    def extract_visual_grid(
+        self,
+        image: Image.Image,
+        question: str,
+        *,
+        layer: int = 6,
+    ) -> np.ndarray:
+        """Residual-stream states at the visual token positions, as a grid.
+
+        SmolVLM lays visual tokens out contiguously in a square grid (64 tokens
+        at 384 px, an 8x8 arrangement), so their hidden states can be folded
+        back into image space. Returns ``(side, side, hidden)``.
+
+        This is what makes a region localizer possible from internal signals
+        alone: a per-cell score can be pooled from the cells' own tokens, with
+        no extra forward pass and no auxiliary model.
+        """
+        self.ensure_loaded()
+
+        import torch
+
+        prompt = self._build_prompt(1, question, None)
+        inputs = self._prepare_inputs(prompt, [image])
+        ids = inputs["input_ids"][0]
+        if self._image_token_id is None or self._image_token_id < 0:
+            raise RuntimeError("this checkpoint has no identifiable image token")
+        positions = (ids == self._image_token_id).nonzero().flatten()
+        count = int(positions.numel())
+        side = int(round(count**0.5))
+        if side * side != count:
+            raise RuntimeError(f"{count} visual tokens do not form a square grid")
+
+        with torch.inference_mode():
+            outputs = self._model(**inputs, output_hidden_states=True)
+        states = outputs.hidden_states[layer][0, positions, :].float().cpu().numpy()
+        return states.reshape(side, side, -1)
 
     def profile_components(
         self,

@@ -6,7 +6,7 @@ Two checks, both falsifiable:
    should cost the same energy. Their disagreement is a direct estimate of the
    instrument's noise floor, with no modelling assumptions.
 2. **Resolution.** That noise floor must be small compared to the effect being
-   claimed — here, the energy difference between the cheapest and the most
+   claimed, here, the energy difference between the cheapest and the most
    expensive configuration.
 
 A run failing these should not be used for any energy claim, however large the
@@ -98,7 +98,7 @@ def main() -> None:
 
     if compared == 0:
         print("  no token count is covered by two configurations; cannot estimate noise")
-        print("\nVERDICT: unvalidated — add configurations that share a token count")
+        print("\nVERDICT: unvalidated: add configurations that share a token count")
         return
 
     effect = (max(per_config.values()) - min(per_config.values())) / min(per_config.values())

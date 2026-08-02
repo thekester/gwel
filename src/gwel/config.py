@@ -69,6 +69,10 @@ class RunnerConfig:
     warmup: int = 0
     include_no_image: bool = True
     include_full: bool = True
+    # A study of the resolution ladder alone should not pay for crops and OCR
+    # it will never read. Both default on, so existing configs are unchanged.
+    include_crop: bool = True
+    include_ocr: bool = True
 
 
 @dataclass(frozen=True)

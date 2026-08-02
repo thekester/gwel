@@ -2,8 +2,8 @@
 
 Records store the raw answer and the gold answers, so the correctness policy
 can be changed and re-applied offline without re-running the model. Each
-dataset gets the metric its benchmark defines: VQA accuracy for VQAv2 and
-TextVQA, ANLS for DocVQA, exact match for V*Bench multiple choice.
+dataset gets the metric its benchmark defines: VQA accuracy for VQAv2
+and TextVQA, ANLS for DocVQA, exact match for V*Bench multiple choice.
 """
 
 from collections.abc import Iterable, Sequence

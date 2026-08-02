@@ -1,9 +1,9 @@
 """Routing without a probe pass.
 
-A confidence-conditioned router must run the cheap pass before deciding, and
-that probe dominates the cost once budgets tighten. This module routes from
-features available *before* any model pass — question wording and image
-geometry — so escalation is decided for free.
+A confidence-conditioned router must run the cheap pass before deciding,
+and that probe dominates the cost once budgets tighten. This module routes from
+features available *before* any model pass, question wording and image
+geometry, so escalation is decided for free.
 
 The classifier is a strongly regularised logistic regression rather than an
 MLP: at pilot scale the extra capacity only buys overfitting, and the question

@@ -4,8 +4,8 @@ Direct NVML integration over short windows proved unusable here: equal-token
 configurations disagreed by 18-28% (see ``scripts/validate_energy.py``), while
 their latencies agree to 4-5%. Zhan et al. (arXiv 2607.09520) profile five
 VLMs on two edge platforms and find that per-inference average power is a
-model fingerprint — invariant to input resolution, image content and prompt
-type, with under 5% variation — so total energy reduces to ``E = P̄ × t``.
+model fingerprint, invariant to input resolution, image content and prompt
+type, with under 5% variation, so total energy reduces to ``E = P̄ × t``.
 
 Taking the reliable measurement (time) and the validated model (constant
 power) gives a more trustworthy energy estimate than integrating a noisy power

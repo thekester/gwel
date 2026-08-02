@@ -88,7 +88,7 @@ def prepare_ops(
         image.width, image.height,
         rows=crop_cfg.rows, cols=crop_cfg.cols, overlap=crop_cfg.overlap,
     )
-    for index, box in enumerate(boxes):
+    for index, box in enumerate(boxes if runner.include_crop else ()):
         row, col = divmod(index, crop_cfg.cols)
         ops.append(
             PreparedOp(
@@ -99,7 +99,7 @@ def prepare_ops(
             )
         )
 
-    if ocr_engine is not None and runner.ocr.regions:
+    if ocr_engine is not None and runner.include_ocr and runner.ocr.regions:
         # OCR on one grid cell: the preview carries the layout while the
         # transcript carries the text, so the pass costs preview-level visual
         # tokens instead of the high-res tokens a CROP would spend.
@@ -124,7 +124,7 @@ def prepare_ops(
                 )
             )
 
-    if ocr_engine is not None:
+    if ocr_engine is not None and runner.include_ocr:
         ocr_cfg = runner.ocr
         if ocr_cfg.source_longest_side is not None:
             source = downscale(image, ocr_cfg.source_longest_side)
@@ -158,18 +158,20 @@ def planned_config_ids(config: GwelConfig) -> tuple[str, ...]:
     ids.extend(f"lowres_{size}" for size in runner.lowres_sizes)
     if runner.include_full:
         ids.append("full")
-    ids.extend(
-        f"crop_r{row}c{col}"
-        for row in range(runner.crop.rows)
-        for col in range(runner.crop.cols)
-    )
-    if runner.ocr.regions:
+    if runner.include_crop:
         ids.extend(
-            f"ocr_r{row}c{col}"
+            f"crop_r{row}c{col}"
             for row in range(runner.crop.rows)
             for col in range(runner.crop.cols)
         )
-    ids.append(f"ocr_{runner.ocr.source}")
+    if runner.include_ocr:
+        if runner.ocr.regions:
+            ids.extend(
+                f"ocr_r{row}c{col}"
+                for row in range(runner.crop.rows)
+                for col in range(runner.crop.cols)
+            )
+        ids.append(f"ocr_{runner.ocr.source}")
     return tuple(ids)
 
 

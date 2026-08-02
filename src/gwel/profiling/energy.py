@@ -4,8 +4,8 @@ Two real backends are provided and both may run simultaneously:
 
 - :class:`RaplBackend` reads Intel RAPL package counters from
   ``/sys/class/powercap`` (Linux, CPU-side energy, counter-based).
-- :class:`NvmlPowerBackend` samples GPU power draw through NVML and
-  integrates it over time (trapezoidal rule).
+- :class:`NvmlPowerBackend` samples GPU power draw through NVML
+  and integrates it over time (trapezoidal rule).
 
 Counters are preferred over sampling when available. Every reading is in
 millijoules; a backend returns ``None`` when it cannot produce a value, so

@@ -2,7 +2,7 @@
 
 Kotte (arXiv 2605.18796) shows that a raw token-margin signal is a weak routing
 score used directly, but becomes near-optimal after a small isotonic fit on a
-held-out calibration set — expected calibration error 0.12 to 0.03, and 11%
+held-out calibration set, expected calibration error 0.12 to 0.03, and 11%
 lower cost than thresholding the raw signal. Their operational summary is to
 calibrate first and threshold second, because most of the value comes from
 making the score probabilistic rather than from tuning the threshold.
@@ -70,7 +70,7 @@ class IsotonicCalibrator:
 def fit_isotonic(uncertainty: np.ndarray, errors: np.ndarray) -> IsotonicCalibrator:
     """Fit P(error | uncertainty), assuming error probability rises with it.
 
-    ``uncertainty`` should increase as the model becomes less sure — pass raw
+    ``uncertainty`` should increase as the model becomes less sure, pass raw
     entropy, or the negation of a margin or log-probability.
     """
     uncertainty = np.asarray(uncertainty, dtype=np.float64)

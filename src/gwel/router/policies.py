@@ -2,8 +2,8 @@
 
 A policy maps an example to one action; the simulator then charges it the
 measured outcome of the cheapest configuration in that action family. This
-makes every policy — fixed, oracle, confidence-threshold, or learned —
-comparable on exactly the same measurements, with no extra GPU time.
+makes every policy (fixed, oracle, confidence-threshold, or learned) comparable on
+exactly the same measurements, with no extra GPU time.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -113,7 +113,7 @@ def simulate(
     ``probe_config_id`` names the cheap pass a confidence-conditioned policy
     must run before it can decide. When set, the policy is charged as a real
     cascade: the probe always, plus the escalation when it escalates. Leaving
-    it ``None`` models a policy that needs no probe — fixed policies, and the
+    it ``None`` models a policy that needs no probe, fixed policies, and the
     oracle as an upper bound.
     """
     results: list[PolicyResult] = []

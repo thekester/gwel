@@ -58,7 +58,7 @@ def main() -> None:
         grouped[record.example_id][record.config_id] = record
 
     # Fit the probe on training examples only, so the attack faces a probe that
-    # never saw it — the same discipline an attacker would face in deployment.
+    # never saw it, the same discipline an attacker would face in deployment.
     stored = np.load(args.activations, allow_pickle=True)
     activations, ids = stored["activations"], list(stored["example_ids"])
     position = {e: i for i, e in enumerate(ids)}

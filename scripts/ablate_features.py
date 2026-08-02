@@ -2,8 +2,8 @@
 
 A confidence-conditioned router must run a cheap pass before it can decide,
 and that probe is not free. This ablation trains the same classifier on
-feature subsets — question text only (zero probe cost), probe signals only,
-and both — to quantify what the probe adds over free features.
+feature subsets, question text only (zero probe cost), probe signals only,
+and both, to quantify what the probe adds over free features.
 
 If question-only features come close, a zero-probe router is possible and the
 cascade's probe cost disappears.

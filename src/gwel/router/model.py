@@ -1,7 +1,7 @@
 """Lightweight MLP router and its (de)serialization.
 
-This module imports torch at module level; import it only from training or
-deployment code paths, never from offline analysis.
+This module imports torch at module level; import it only from training
+or deployment code paths, never from offline analysis.
 """
 
 import json

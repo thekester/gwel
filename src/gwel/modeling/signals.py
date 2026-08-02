@@ -2,8 +2,8 @@
 
 All functions operate on numpy arrays so they stay testable without torch.
 Scores are raw logits over the vocabulary, one row per generated token.
-Entropies are in nats; margins are probability gaps between the top-1 and
-top-2 tokens.
+Entropies are in nats; margins are probability gaps between the top-1
+and top-2 tokens.
 """
 
 from collections.abc import Sequence

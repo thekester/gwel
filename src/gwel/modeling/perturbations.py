@@ -23,7 +23,7 @@ class BorderPerturbation:
 
     ``mode`` selects which attack direction is being probed. Liu et al. force
     *more* escalation to inflate the provider's bill; Sun et al. (arXiv
-    2605.17288) point out the opposite threat for text cascades — suppressing
+    2605.17288) point out the opposite threat for text cascades, suppressing
     escalation so the system keeps answering from the weak model, degrading
     accuracy rather than cost. Both directions need a perturbation, and they
     plausibly need different ones.

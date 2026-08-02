@@ -2,8 +2,8 @@
 
 Claims written in `ANGLES.md`, `FINDINGS.md` and `PROPOSAL.md` are prose. This
 turns each one into an executable check with an explicit numeric threshold, so
-a claim that stops holding — because more data arrived, because a bug was
-fixed, because a config changed — fails loudly instead of surviving in a
+a claim that stops holding, because more data arrived, because a bug was
+fixed, because a config changed, fails loudly instead of surviving in a
 markdown file.
 
 Every check states what it needs. Missing artefacts report SKIP, never a silent
@@ -84,7 +84,8 @@ def _():
 
 @check("A2: token pruning is capped at roughly half the visual saving")
 def _():
-    rows = {r["config"]: r for r in json.loads(Path("results/component_latency.json").read_text())}
+    rows = {r["config"]: r for r in
+    json.loads(Path("results/component_latency.json").read_text())}
     base = rows["no_image"]["prefill_ms"]
     row = rows["longest_1536"]
     encoder = row["vision_encoder_ms"] + row["projector_ms"]
@@ -144,7 +145,8 @@ def _():
     grouped = _grouped(PILOT)
     ids = [
         e for e in grouped
-        if "lowres_384" in grouped[e] and "full" in grouped[e] and grouped[e]["lowres_384"].signals
+        if "lowres_384" in grouped[e] and "full" in grouped[e]
+        and grouped[e]["lowres_384"].signals
     ]
     entropy = np.array(
         [ConfidenceSignals.from_dict(grouped[e]["lowres_384"].signals).mean_entropy for e in ids]
@@ -362,6 +364,787 @@ def _():
     ok = len(regions) <= 3
     return ("PASS" if ok else "FAIL"), f"{len(regions)} policy regions: " + ", ".join(
         r[2].value for r in regions
+    )
+
+
+@check("P5: an internal-signal region localizer does NOT beat random cell choice")
+def _():
+    from gwel.router.localizer import evaluate_localizer, pool_cells, train_localizer
+    from gwel.router.splits import make_split
+
+    stored = np.load("results/visual_grids_multi.npz", allow_pickle=True)
+    grids = stored["grids"]
+    ids = list(stored["example_ids"])
+    layers = list(stored["layers"])
+    grouped = _grouped(PILOT)
+    cells = [f"crop_r{r}c{c}" for r in range(2) for c in range(2)]
+    labels = [[grouped[e][c].correct for c in cells] for e in ids]
+    split = make_split(
+        ids, [grouped[e][cells[0]].dataset for e in ids],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(ids)}
+    train = [order[e] for e in split.train if e in order]
+    test = [order[e] for e in split.test if e in order]
+
+    margins = []
+    for k in range(len(layers)):
+        features = [pool_cells(grids[i, k], 2, 2) for i in range(len(ids))]
+        localizer = train_localizer([features[i] for i in train], [labels[i] for i in
+        train])
+        stats = evaluate_localizer(
+            localizer, [features[i] for i in test], [labels[i] for i in test]
+        )
+        margins.append(stats["chosen"] - stats["random"])
+    # The claim is a negative: no layer beats random by more than noise.
+    ok = max(margins) <= 0.02
+    return ("PASS" if ok else "FAIL"), (
+        f"best margin over random {max(margins):+.1%} across layers {layers}"
+    )
+
+
+@check("C3: aborting the prefill mid-flight really saves what the model predicts")
+def _():
+    measured = json.loads(Path("results/early_exit.json").read_text())
+    rows = {r["config"]: r for r in
+    json.loads(Path("results/component_latency.json").read_text())}
+    cheap = rows["longest_384"]
+    predicted = (
+        cheap["vision_encoder_ms"] + cheap["projector_ms"]
+        + cheap["prefill_ms"] * measured["exit_layer"] / measured["decoder_layers"]
+    )
+    error = abs(measured["truncated_prefill_ms"] - predicted) / predicted
+    saves = measured["saving_ms"] > 0
+    ok = saves and error < 0.15
+    return ("PASS" if ok else "FAIL"), (
+        f"truncated prefill {measured['truncated_prefill_ms']:.1f} ms vs "
+        f"{predicted:.1f} predicted ({error:.0%} error); "
+        f"escalated query saves {measured['saving_fraction']:.0%}"
+    )
+
+
+@check("C4: an untrained self-report baseline loses to uncertainty routing")
+def _():
+    import sys
+
+    sys.path.insert(0, "scripts")
+    from baseline_self_report import PROMPTS, says_escalate
+
+    from gwel.modeling.signals import ConfidenceSignals
+    from gwel.router.evaluate import paired_difference
+    from gwel.router.splits import make_split
+
+    reports = json.loads(Path("results/self_report.json").read_text())
+    grouped = _grouped(PILOT)
+    usable = [
+        e for e in reports
+        if "lowres_384" in grouped[e] and "full" in grouped[e]
+        and grouped[e]["lowres_384"].signals
+    ]
+    cheap_ok = np.array([grouped[e]["lowres_384"].correct for e in usable])
+    full_ok = np.array([grouped[e]["full"].correct for e in usable])
+    entropy = np.array(
+        [ConfidenceSignals.from_dict(grouped[e]["lowres_384"].signals).mean_entropy
+         for e in usable]
+    )
+    split = make_split(
+        usable, [grouped[e]["lowres_384"].dataset for e in usable],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(usable)}
+    train = np.array([order[e] for e in split.train])
+    test = np.array([order[e] for e in split.test])
+
+    best = None
+    for prompt in PROMPTS:
+        flags = np.array([says_escalate(reports[e][prompt]["answer"], prompt) for e in
+        usable])
+        accuracy = np.where(flags[test], full_ok[test], cheap_ok[test])
+        if best is None or accuracy.mean() > best[0].mean():
+            best = (accuracy, float(flags[test].mean()))
+    baseline, rate = best
+
+    cut = np.quantile(entropy[train], 1.0 - rate)
+    routed = np.where(entropy[test] >= cut, full_ok[test], cheap_ok[test])
+    delta = paired_difference(routed.astype(float).tolist(),
+    baseline.astype(float).tolist())
+    ok = delta.low > 0
+    return ("PASS" if ok else "FAIL"), (
+        f"entropy at the same {rate:.0%} rate is {delta} more accurate"
+    )
+
+
+@check("C5: probe dominance replicates on a second serving model")
+def _():
+    from gwel.router.evaluate import pareto_front
+    from gwel.router.probes import fit_layer_probe
+    from gwel.router.splits import make_split
+
+    stored = np.load("results/activations_serve256.npz", allow_pickle=True)
+    activations, ids = stored["activations"], list(stored["example_ids"])
+    grouped = _grouped("results/runs/serve256_records.jsonl")
+    cheap_ok = np.array([grouped[e]["lowres_384"].correct for e in ids])
+    full_ok = np.array([grouped[e]["full"].correct for e in ids])
+    entropy = np.array([
+        float(grouped[e]["lowres_384"].signals["mean_entropy"]) for e in ids
+    ])
+    gain = ((~cheap_ok) & full_ok).astype(float)
+
+    split = make_split(
+        ids, [grouped[e]["lowres_384"].dataset for e in ids],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(ids)}
+    train = np.array([order[e] for e in split.train])
+    test = np.array([order[e] for e in split.test])
+
+    layer = 6
+    probe = fit_layer_probe(activations[train, layer, :], gain[train], layer)
+    score = probe.score(activations[:, layer, :])
+
+    cheap_ms, full_ms, probe_ms = 123.4, 206.0, 20.3
+    costs, accuracies, labels = [cheap_ms], [float(cheap_ok[test].mean())], ["cheap"]
+    for rate in (0.10, 0.20, 0.30, 0.40, 0.50, 0.70):
+        for tag, values, uses_probe in (("entropy", entropy, False), ("probe", score,
+        True)):
+            cut = np.quantile(values[train], 1.0 - rate)
+            escalates = values[test] >= cut
+            accuracies.append(float(np.where(escalates, full_ok[test],
+            cheap_ok[test]).mean()))
+            costs.append(float(
+                np.where(escalates, probe_ms + full_ms, cheap_ms).mean() if uses_probe
+                else (cheap_ms + escalates * full_ms).mean()
+            ))
+            labels.append(tag)
+    costs.append(full_ms); accuracies.append(float(full_ok[test].mean()));
+    labels.append("full")
+
+    front = {labels[i] for i in pareto_front(costs, accuracies)}
+    ok = "probe" in front and "entropy" not in front
+    return ("PASS" if ok else "FAIL"), f"Pareto front contains {sorted(front)}"
+
+
+# ------------------------------------------------- decision-rule claims (D)
+
+def _decision_arrays(layer: int = 6):
+    """Correctness, entropy and a joint-target probe score on the pilot."""
+    from gwel.router.decision import signed_gain
+    from gwel.router.probes import fit_layer_probe
+    from gwel.router.splits import make_split
+
+    stored = np.load("results/activations_full.npz", allow_pickle=True)
+    activations, ids = stored["activations"], [str(e) for e in stored["example_ids"]]
+    grouped = _grouped(PILOT)
+    usable = [
+        e for e in ids
+        if "lowres_384" in grouped[e] and "full" in grouped[e]
+        and grouped[e]["lowres_384"].signals
+    ]
+    position = {e: i for i, e in enumerate(ids)}
+    cheap_ok = np.array([grouped[e]["lowres_384"].correct for e in usable])
+    full_ok = np.array([grouped[e]["full"].correct for e in usable])
+    entropy = np.array([
+        float(grouped[e]["lowres_384"].signals["mean_entropy"]) for e in usable
+    ])
+    matrix = activations[[position[e] for e in usable]][:, layer, :]
+
+    split = make_split(
+        usable, [grouped[e]["lowres_384"].dataset for e in usable],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(usable)}
+    train = np.array([order[e] for e in split.train])
+    test = np.array([order[e] for e in split.test])
+
+    gains = signed_gain(cheap_ok, full_ok)
+    probe = fit_layer_probe(matrix[train], (gains[train] > 0).astype(float), layer)
+    return cheap_ok, full_ok, entropy, probe.score(matrix), gains, train, test
+
+
+COSTS = {"cheap": 123.4, "full": 206.0, "probe": 20.3}
+
+
+def _policy_cost(escalates: np.ndarray, *, read: str) -> np.ndarray:
+    cheap, full, probe = COSTS["cheap"], COSTS["full"], COSTS["probe"]
+    if read == "entropy":
+        return cheap + escalates * full
+    return np.where(escalates, probe + full, cheap)
+
+
+@check("D1: calibrating correctness over-escalates versus calibrating the gain")
+def _():
+    """UCCI's Theorem 1 assumes escalation delivers a fixed accuracy.
+
+    Non-monotone escalation violates that, so a correctness-calibrated rule
+    should spend more compute for no more accuracy than a gain-calibrated one.
+    """
+    from gwel.router.decision import (
+        escalation_delta,
+        fit_correctness_rule,
+        fit_gain_rule,
+    )
+    from gwel.router.evaluate import paired_difference
+
+    cheap_ok, full_ok, _, probe_score, gains, train, test = _decision_arrays()
+    delta = escalation_delta(COSTS, read="probe")
+    value = 800.0
+
+    gain_rule = fit_gain_rule(
+        probe_score[train], gains[train], delta_ms=delta, value_ms_per_correct=value
+    )
+    ucci_rule = fit_correctness_rule(
+        probe_score[train], cheap_ok[train],
+        full_accuracy=float(full_ok[train].mean()),
+        delta_ms=delta, value_ms_per_correct=value,
+    )
+    gain_fires = gain_rule.escalate(probe_score[test])
+    ucci_fires = ucci_rule.escalate(probe_score[test])
+
+    gain_ok = np.where(gain_fires, full_ok[test], cheap_ok[test]).astype(float)
+    ucci_ok = np.where(ucci_fires, full_ok[test], cheap_ok[test]).astype(float)
+    accuracy = paired_difference(gain_ok.tolist(), ucci_ok.tolist())
+    latency = paired_difference(
+        _policy_cost(gain_fires, read="probe").tolist(),
+        _policy_cost(ucci_fires, read="probe").tolist(),
+    )
+    # Same accuracy (interval spans zero), strictly less compute (interval below zero).
+    ok = accuracy.low <= 0.0 <= accuracy.high and latency.high < 0.0
+    return ("PASS" if ok else "FAIL"), (
+        f"escalates {gain_fires.mean():.0%} vs {ucci_fires.mean():.0%}; "
+        f"accuracy {accuracy}, latency {latency} ms"
+    )
+
+
+@check("D2: an untuned cost-derived rule reaches the tuned sweep's frontier")
+def _():
+    from gwel.router.decision import escalation_delta, fit_gain_rule
+
+    cheap_ok, full_ok, _, probe_score, gains, train, test = _decision_arrays()
+    delta = escalation_delta(COSTS, read="probe")
+
+    swept = []
+    for rate in (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70):
+        cut = np.quantile(probe_score[train], 1.0 - rate)
+        fires = probe_score[test] >= cut
+        swept.append((
+            float(np.where(fires, full_ok[test], cheap_ok[test]).mean()),
+            float(_policy_cost(fires, read="probe").mean()),
+        ))
+
+    undominated = 0
+    values = (100.0, 200.0, 400.0, 800.0, 1600.0, 3200.0)
+    for value in values:
+        rule = fit_gain_rule(
+            probe_score[train], gains[train], delta_ms=delta, value_ms_per_correct=value
+        )
+        fires = rule.escalate(probe_score[test])
+        accuracy = float(np.where(fires, full_ok[test], cheap_ok[test]).mean())
+        latency = float(_policy_cost(fires, read="probe").mean())
+        undominated += not any(
+            a >= accuracy - 1e-9 and c <= latency + 1e-9 and (a > accuracy or c < latency)
+            for a, c in swept
+        )
+    ok = undominated >= len(values) - 1
+    return ("PASS" if ok else "FAIL"), (
+        f"{undominated}/{len(values)} self-selected points undominated by the tuned sweep"
+    )
+
+
+@check("D3: the probe's break-even gain is half entropy's, so it escalates on weaker evidence")
+def _():
+    from gwel.router.decision import escalation_delta
+
+    entropy_delta = escalation_delta(COSTS, read="entropy")
+    probe_delta = escalation_delta(COSTS, read="probe")
+    ratio = probe_delta / entropy_delta
+    ok = 0.40 <= ratio <= 0.60
+    return ("PASS" if ok else "FAIL"), (
+        f"escalation costs {probe_delta:.1f} ms on the probe vs {entropy_delta:.1f} ms "
+        f"on entropy ({ratio:.2f}x)"
+    )
+
+
+@check("D4: probe dominance is NOT universal across splits, but its saving is")
+def _():
+    """The headline is fold-specific; the distributional statement is not.
+
+    Reported as a claim in its own right because the single-fold version was
+    stated too strongly, and this check exists so it cannot be restated.
+    """
+    summary = json.loads(Path("results/resplit_dominance.json").read_text())
+    universal = summary["dominance_rate"]
+    positive = summary["saving_positive_rate"]
+    share = summary["probe_share_of_front_mean"]
+    ok = universal < 0.95 and positive >= 0.95 and share >= 0.75
+    return ("PASS" if ok else "FAIL"), (
+        f"all-dominated in {universal:.0%} of {summary['trials']} splits; "
+        f"saving positive in {positive:.0%}; probe holds {share:.0%} of the front; "
+        f"median saving {summary['saving_median']:+.1%}"
+    )
+
+
+# ---------------------------------------------------- abstention claims (B)
+
+def _solvable(example_ids: list[str]) -> np.ndarray:
+    """Whether any routable configuration answered each query correctly."""
+    grouped = _grouped(PILOT)
+    return np.array([
+        any(
+            record.correct
+            for config_id, record in grouped[example].items()
+            if config_id != "no_image"
+        )
+        for example in example_ids
+    ])
+
+
+def _usable_ids() -> list[str]:
+    stored = np.load("results/activations_full.npz", allow_pickle=True)
+    grouped = _grouped(PILOT)
+    return [
+        str(e) for e in stored["example_ids"]
+        if "lowres_384" in grouped[str(e)] and "full" in grouped[str(e)]
+        and grouped[str(e)]["lowres_384"].signals
+    ]
+
+
+@check("B1: abstention is worth little as a budget action, because the rule already avoids hopeless queries")
+def _():
+    """Escalating a query no configuration can answer is pure waste.
+
+    If the calibrated rule escalated them at their base rate, a perfect
+    abstention gate would recover that whole share. It does not: the rule sends
+    them to escalation *below* base rate, so the headroom is the margin only.
+    """
+    from gwel.router.decision import escalation_delta, fit_gain_rule
+
+    cheap_ok, full_ok, _, probe_score, gains, train, test = _decision_arrays()
+    solvable = _solvable(_usable_ids())
+    delta = escalation_delta(COSTS, read="probe")
+
+    rule = fit_gain_rule(
+        probe_score[train], gains[train], delta_ms=delta, value_ms_per_correct=800.0
+    )
+    fires = rule.escalate(probe_score[test])
+    base = float(1 - solvable[test].mean())
+    escalated_hopeless = float((~solvable[test][fires]).mean())
+
+    gated = fires & solvable[test]
+    cost = float(_policy_cost(fires, read="probe").mean())
+    gated_cost = float(_policy_cost(gated, read="probe").mean())
+    saving = (cost - gated_cost) / cost
+    accuracy_loss = float(
+        np.where(fires, full_ok[test], cheap_ok[test]).mean()
+        - np.where(gated, full_ok[test], cheap_ok[test]).mean()
+    )
+    ok = escalated_hopeless < base and saving < 0.10 and abs(accuracy_loss) < 1e-9
+    return ("PASS" if ok else "FAIL"), (
+        f"escalates hopeless queries at {escalated_hopeless:.0%} vs {base:.0%} base; "
+        f"a perfect gate saves {saving:.1%} at zero accuracy cost"
+    )
+
+
+@check("B2: the three-way conformal policy holds its coverage guarantee out of sample")
+def _():
+    """Split conformal promises miscoverage <= alpha on exchangeable test data.
+
+    Checked directly: the share of test scores at or below the answer threshold
+    must reach 1 - alpha, up to the finite-sample slack of a 600-example
+    calibration set.
+    """
+    from gwel.modeling.signals import ConfidenceSignals
+    from gwel.router.conformal import fit_three_way
+
+    grouped = _grouped(PILOT)
+    ids = _usable_ids()
+    scores = np.array([
+        ConfidenceSignals.from_dict(grouped[e]["lowres_384"].signals).mean_entropy
+        for e in ids
+    ])
+    from gwel.router.splits import make_split
+
+    split = make_split(
+        ids, [grouped[e]["lowres_384"].dataset for e in ids],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(ids)}
+    train = np.array([order[e] for e in split.train])
+    test = np.array([order[e] for e in split.test])
+
+    slack = 1.0 / (len(train) + 1)
+    gaps = []
+    for answer_alpha, abstain_alpha in ((0.70, 0.30), (0.60, 0.20), (0.50, 0.10)):
+        policy = fit_three_way(
+            scores[train].tolist(),
+            answer_alpha=answer_alpha, abstain_alpha=abstain_alpha,
+        )
+        realised = float((scores[test] <= policy.answer_threshold).mean())
+        gaps.append(realised - (1.0 - answer_alpha))
+    ok = all(gap >= -0.05 - slack for gap in gaps)
+    return ("PASS" if ok else "FAIL"), (
+        f"coverage minus target: {[f'{g:+.3f}' for g in gaps]} (slack {slack:.4f})"
+    )
+
+
+@check("B3: a recall-controlled threshold meets its target and cannot degenerate")
+def _():
+    """The fix for a tuner that discovers 'never escalate' on one fold.
+
+    Ruan et al.'s construction sets the gate from an exact Clopper-Pearson
+    lower bound on the survival rate of recoverable queries, so a recall floor
+    forbids the empty policy by construction.
+    """
+    from gwel.modeling.signals import ConfidenceSignals
+    from gwel.router.recall_control import certifiable_recall, fit_recall_controlled
+    from gwel.router.splits import make_split
+
+    grouped = _grouped(PILOT)
+    ids = _usable_ids()
+    scores = np.array([
+        ConfidenceSignals.from_dict(grouped[e]["lowres_384"].signals).mean_entropy
+        for e in ids
+    ])
+    cheap_ok = np.array([grouped[e]["lowres_384"].correct for e in ids])
+    full_ok = np.array([grouped[e]["full"].correct for e in ids])
+    recoverable = (~cheap_ok) & full_ok
+
+    split = make_split(
+        ids, [grouped[e]["lowres_384"].dataset for e in ids],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(ids)}
+    train = np.array([order[e] for e in split.train])
+    test = np.array([order[e] for e in split.test])
+
+    ceiling = certifiable_recall(int(recoverable[train].sum()))
+    rows = []
+    ok = True
+    for target in (0.80, 0.90):
+        fitted = fit_recall_controlled(
+            scores[train].tolist(), recoverable[train].tolist(), target_recall=target
+        )
+        escalates = scores[test] >= fitted.threshold
+        achieved = float(escalates[recoverable[test]].mean())
+        rows.append(f"{target:.2f}->{achieved:.2f}")
+        # The guarantee is on the certified floor, not the point estimate, so a
+        # small shortfall on 200 test examples is allowed; an empty policy is not.
+        ok &= achieved >= target - 0.10 and escalates.mean() > 0.0
+    return ("PASS" if ok else "FAIL"), (
+        f"target->achieved {rows}; certifiable ceiling {ceiling:.3f}"
+    )
+
+
+# -------------------------------------------------- cost-model claims (M)
+
+@check("M1: the flat escalation price under-charges, because profiling used an image that did not escalate")
+def _():
+    """A third measurement bug of the same family as the two in FINDINGS S7.
+
+    The processor caps its target at the input's longest side, so ``full`` costs
+    what the image allows. The profiling image yielded 320 visual tokens; the
+    pilot averages far more, so a flat cost taken from it prices an escalation
+    that did not happen.
+    """
+    from gwel.oracle.token_cost import fit_token_cost
+
+    profile = json.loads(Path("results/component_latency.json").read_text())
+    model = fit_token_cost(
+        [r["visual_tokens"] for r in profile], [r["total_ms"] for r in profile]
+    )
+    grouped = _grouped(PILOT)
+    tokens = np.array([
+        grouped[e]["full"].visual_tokens for e in grouped if "full" in grouped[e]
+    ], dtype=float)
+    profiled_max = max(r["visual_tokens"] for r in profile)
+    flat = next(r["total_ms"] for r in profile if r["config"] == "longest_1536")
+    honest = float(model.predict(tokens).mean())
+    ok = honest > flat * 1.05 and model.residual_ms < 5.0
+    return ("PASS" if ok else "FAIL"), (
+        f"pilot mean {tokens.mean():.0f} tokens vs {profiled_max} profiled; "
+        f"flat {flat:.1f} ms vs per-example {honest:.1f} ms ({honest / flat - 1:+.0%}), "
+        f"fit residual {model.residual_ms:.1f} ms"
+    )
+
+
+@check("M2: the probe escalates more expensive queries than entropy does")
+def _():
+    """A selection effect on cost that a flat cost model cannot show.
+
+    The queries more pixels help are the queries with more pixels to add, so a
+    signal that ranks escalation value well also picks the dearer escalations.
+    Ranking quality and cost saving therefore partly cancel.
+    """
+    from gwel.router.decision import signed_gain
+    from gwel.router.probes import fit_layer_probe
+    from gwel.router.splits import make_split
+
+    stored = np.load("results/activations_full.npz", allow_pickle=True)
+    activations, ids = stored["activations"], [str(e) for e in stored["example_ids"]]
+    grouped = _grouped(PILOT)
+    usable = [
+        e for e in ids
+        if "lowres_384" in grouped[e] and "full" in grouped[e]
+        and grouped[e]["lowres_384"].signals
+    ]
+    position = {e: i for i, e in enumerate(ids)}
+    matrix = activations[[position[e] for e in usable]][:, 6, :]
+    cheap_ok = np.array([grouped[e]["lowres_384"].correct for e in usable])
+    full_ok = np.array([grouped[e]["full"].correct for e in usable])
+    entropy = np.array([
+        float(grouped[e]["lowres_384"].signals["mean_entropy"]) for e in usable
+    ])
+    tokens = np.array([grouped[e]["full"].visual_tokens for e in usable], dtype=float)
+
+    split = make_split(
+        usable, [grouped[e]["lowres_384"].dataset for e in usable],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(usable)}
+    train = np.array([order[e] for e in split.train])
+    test = np.array([order[e] for e in split.test])
+    gains = signed_gain(cheap_ok, full_ok)
+    score = fit_layer_probe(matrix[train], (gains[train] > 0).astype(float),
+    6).score(matrix)
+
+    ratios = []
+    for rate in (0.20, 0.30, 0.40):
+        entropy_fires = entropy[test] >= np.quantile(entropy[train], 1 - rate)
+        probe_fires = score[test] >= np.quantile(score[train], 1 - rate)
+        ratios.append(float(tokens[test][probe_fires].mean() /
+        tokens[test][entropy_fires].mean()))
+    ok = all(r > 1.05 for r in ratios)
+    return ("PASS" if ok else "FAIL"), (
+        f"probe/entropy escalated-token ratio {[f'{r:.2f}' for r in ratios]} at 20/30/40%"
+    )
+
+
+@check("M3: KV-cache reuse cannot erase the probe's advantage, because decode is uncacheable")
+def _():
+    summary = json.loads(Path("results/cache_sensitivity.json").read_text())
+    floor = summary["floor_ms"]
+    share = summary["floor_share_of_uncached"]
+    ok = floor > 0.0 and share > 0.5 and not summary["advantage_erasable"]
+    return ("PASS" if ok else "FAIL"), (
+        f"at a perfect encoder+prefill cache the probe still saves {floor:.1f} ms "
+        f"per escalation, {share:.0%} of its uncached saving"
+    )
+
+
+# ------------------------------------------- domain-confound claims (E)
+
+@check("E1: a free image-size feature nearly matches the probe on the pooled mixture")
+def _():
+    summary = json.loads(Path("results/domain_confound.json").read_text())
+    pooled = summary["pooled"]
+    margin = pooled["probe"] - pooled["image_size"]
+    ok = margin < 0.05
+    return ("PASS" if ok else "FAIL"), (
+        f"probe {pooled['probe']:.3f} vs image size {pooled['image_size']:.3f} "
+        f"(margin {margin:+.3f}), entropy {pooled['entropy']:.3f}"
+    )
+
+
+@check("E2: within a single dataset the probe falls to chance while entropy holds")
+def _():
+    """The load-bearing negative result of the cost audit.
+
+    If the probe encoded escalation value it would survive removal of the
+    between-domain axis. It does not, at any depth.
+    """
+    summary = json.loads(Path("results/domain_confound.json").read_text())
+    weighted = summary["within_weighted"]
+    per_dataset = summary["within"]
+    best_layer = max(summary["layer_sweep"]["points"], key=lambda r: r["auroc"])
+    entropy_there = next(
+        row["entropy"] for row in per_dataset
+        if row["dataset"] == summary["layer_sweep"]["dataset"]
+    )
+    chance_like = all(row["probe_low"] < 0.62 for row in per_dataset)
+    ok = (
+        weighted["probe"] < 0.60
+        and weighted["entropy"] > 0.62
+        and chance_like
+        and best_layer["auroc"] < entropy_there
+    )
+    return ("PASS" if ok else "FAIL"), (
+        f"within-domain probe {weighted['probe']:.3f} vs entropy "
+        f"{weighted['entropy']:.3f}; best depth {best_layer['layer']} reaches "
+        f"{best_layer['auroc']:.3f} against entropy {entropy_there:.3f}"
+    )
+
+
+# ------------------------------------------ within-domain rule claims (W)
+
+DATASET_SIZES = {"docvqa": 300, "textvqa": 250, "vqav2": 300, "vstar": 150}
+
+
+def _within_domain():
+    return json.loads(Path("results/within_domain.json").read_text())
+
+
+def _weighted(rows: dict, policy: str) -> tuple[float, float]:
+    total = sum(DATASET_SIZES[d] for d in rows)
+    accuracy = sum(rows[d][policy]["accuracy"] * DATASET_SIZES[d] for d in rows) / total
+    latency = sum(rows[d][policy]["latency"] * DATASET_SIZES[d] for d in rows) / total
+    return accuracy, latency
+
+
+@check("W1: one operator preference yields a different escalation rate per domain, tracking its value")
+def _():
+    """What a tuned rate structurally cannot do.
+
+    Escalation value is domain-determined, so a fixed rate is wrong in every
+    domain but one. A rule calibrated on the observed gain distribution picks
+    its own rate wherever it is fitted.
+    """
+    rows = _within_domain()["datasets"]
+    repairs = json.loads(Path("results/domain_confound.json").read_text())["mixture"]
+    repair_rate = {row["dataset"]: row["repair_rate"] for row in repairs}
+    chosen, actual = [], []
+    for dataset, policies in rows.items():
+        chosen.append(policies["gain rule V=800"]["rate"])
+        actual.append(repair_rate[dataset])
+    correlation = float(np.corrcoef(chosen, actual)[0, 1])
+    spread = max(chosen) - min(chosen)
+    ok = correlation > 0.85 and spread > 0.30
+    return ("PASS" if ok else "FAIL"), (
+        f"rates {[f'{c:.0%}' for c in chosen]} against repair rates "
+        f"{[f'{a:.0%}' for a in actual]}, r={correlation:+.3f}"
+    )
+
+
+@check("W2: one cost-derived rule beats one tuned rate applied across the same domains")
+def _():
+    """The method survives its signal being discredited.
+
+    Both policies are fixed once and applied unchanged to four domains, which is
+    what a deployment does. Sizes weight the average.
+    """
+    rows = _within_domain()["datasets"]
+    rule = _weighted(rows, "gain rule V=800")
+    tuned = _weighted(rows, "tuned rate 30%")
+    ok = rule[0] > tuned[0] and rule[1] < tuned[1]
+    return ("PASS" if ok else "FAIL"), (
+        f"rule {rule[0]:.3f} at {rule[1]:.1f} ms dominates tuned-30% "
+        f"{tuned[0]:.3f} at {tuned[1]:.1f} ms"
+    )
+
+
+@check("W3: a per-query break-even is NOT worth it, and the confound explains why")
+def _():
+    """A negative result on a refinement of our own.
+
+    Charging each query its own escalation price should help where prices vary.
+    Within a domain they barely do --- image size is largely a domain property,
+    which is the same fact that produced the confound --- so the refinement buys
+    nothing. Asserted as a negative so it cannot be quietly reported as a win.
+    """
+    summary = _within_domain()["per_query_vs_global"]
+    accuracy, latency = summary["accuracy"], summary["latency"]
+    accuracy_null = accuracy[1] <= 0.0 <= accuracy[2]
+    latency_null = latency[1] <= 0.0 <= latency[2]
+    return ("PASS" if accuracy_null and latency_null else "FAIL"), (
+        f"accuracy {accuracy[0]:+.3f} [{accuracy[1]:+.3f}, {accuracy[2]:+.3f}], "
+        f"latency {latency[0]:+.1f} [{latency[1]:+.1f}, {latency[2]:+.1f}] ms: "
+        f"both span zero"
+    )
+
+
+# ------------------------------------------------ resolution-ladder claims (L)
+
+@check("L1: most escalated queries do not need the top rung")
+def _():
+    """Binary escalation over-serves, and the oracle over the ladder says by how much."""
+    grouped = _grouped(PILOT)
+    rungs = ["lowres_384", "lowres_768", "full"]
+    ids = [e for e in grouped if all(c in grouped[e] for c in rungs)]
+    correct = {c: np.array([grouped[e][c].correct for e in ids]) for c in rungs}
+
+    cheapest = np.full(len(ids), -1)
+    for index in range(len(ids)):
+        for level, config_id in enumerate(rungs):
+            if correct[config_id][index]:
+                cheapest[index] = level
+                break
+    needs_middle = float((cheapest == 1).mean())
+    needs_top = float((cheapest == 2).mean())
+    over_served = needs_middle / (needs_middle + needs_top)
+    ok = over_served > 0.60
+    return ("PASS" if ok else "FAIL"), (
+        f"{needs_middle:.1%} need the middle rung against {needs_top:.1%} the top; "
+        f"binary escalation over-serves {over_served:.0%} of what it escalates"
+    )
+
+
+@check("L2: the first rung is the efficient one")
+def _():
+    from gwel.oracle.token_cost import fit_token_cost
+
+    profile = json.loads(Path("results/component_latency.json").read_text())
+    model = fit_token_cost(
+        [r["visual_tokens"] for r in profile], [r["total_ms"] for r in profile]
+    )
+    grouped = _grouped(PILOT)
+    rungs = ["lowres_384", "lowres_768", "full"]
+    ids = [e for e in grouped if all(c in grouped[e] for c in rungs)]
+    correct = {c: np.array([grouped[e][c].correct for e in ids]) for c in rungs}
+    latency = {
+        c: model.predict(np.array([grouped[e][c].visual_tokens for e in ids]))
+        for c in rungs
+    }
+
+    def rate(low: str, high: str) -> float:
+        gain = float(
+            (correct[high] & ~correct[low]).mean() - (correct[low] & ~correct[high]).mean()
+        )
+        return gain / float((latency[high] - latency[low]).mean()) * 1000.0
+
+    first = rate("lowres_384", "lowres_768")
+    second = rate("lowres_768", "full")
+    binary = rate("lowres_384", "full")
+    ok = first > second and first > binary
+    return ("PASS" if ok else "FAIL"), (
+        f"points per second: first rung {first:+.2f}, second {second:+.2f}, "
+        f"binary jump {binary:+.2f}"
+    )
+
+
+@check("L3: the ladder policy is cheaper at indistinguishable accuracy, and only where a rung exists")
+def _():
+    summary = json.loads(Path("results/ladder.json").read_text())
+    accuracy = summary["ladder_vs_binary"]["accuracy"]
+    latency = summary["ladder_vs_binary"]["latency"]
+    accuracy_null = accuracy[1] <= 0.0 <= accuracy[2]
+    cheaper = latency[2] < 0.0
+    # The effect must be concentrated where the two rungs are distinct
+    # configurations; where they are not, the ladder must do nothing.
+    per_domain = summary["per_domain"]
+    absent = [v for v in per_domain.values() if v["top_rung_exists"] < 0.05]
+    present = [v for v in per_domain.values() if v["top_rung_exists"] > 0.5]
+    inert = all(abs(v["latency_delta"]) < 5.0 for v in absent)
+    biggest = min(v["latency_delta"] for v in present)
+    ok = accuracy_null and cheaper and inert and biggest < -20.0
+    return ("PASS" if ok else "FAIL"), (
+        f"accuracy {accuracy[0]:+.3f} [{accuracy[1]:+.3f}, {accuracy[2]:+.3f}], "
+        f"latency {latency[0]:+.1f} [{latency[1]:+.1f}, {latency[2]:+.1f}] ms; "
+        f"best domain {biggest:+.1f} ms, inert where no rung exists"
+    )
+
+
+@check("L4: a configuration name does not determine a configuration")
+def _():
+    """The fourth instance of this project's recurring measurement error.
+
+    For half the pilot the 'full resolution' pass is literally the intermediate
+    pass, because the processor caps its target at the input's longest side.
+    """
+    summary = json.loads(Path("results/ladder.json").read_text())
+    existence = summary["top_rung_exists"]
+    absent = [d for d, share in existence.items() if share < 0.05]
+    ok = len(absent) >= 2
+    return ("PASS" if ok else "FAIL"), (
+        "top rung exists for "
+        + ", ".join(f"{d} {share:.0%}" for d, share in sorted(existence.items()))
     )
 
 

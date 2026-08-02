@@ -1,0 +1,94 @@
+# Single-domain pilot, built to settle two questions the mixture cannot.
+#
+# 1. Is the probe's within-domain collapse real, or a sample-size artefact?
+#    On the four-dataset pilot the probe is fitted on 600 pooled examples and
+#    only 210 within a domain, so the collapse has a confound of its own. Here
+#    the fit gets ~840 DocVQA examples, comparable to the pooled fit that
+#    worked.
+#
+# 2. Does the resolution ladder pay when its rungs are verified distinct?
+#    On the mixture, `full` and `lowres_768` are the same configuration for
+#    56% of examples, because the processor caps its target at the input's
+#    longest side. The rungs below were measured, not assumed: SmolVLM's patch
+#    grid quantises to 64 / 320 / 640 / 1088 visual tokens, and 384-512,
+#    768-1024, 1152-1536 fall in the same bucket as each other. This ladder
+#    steps across buckets, so every rung costs strictly more than the one below
+#    on any image at least 2048 px on its longest side.
+#
+# DocVQA is the right domain: it has the largest images, the highest escalation
+# value (45% of queries repaired), and it is the only dataset in the mixture
+# where a top rung existed at all.
+
+model:
+  model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/docvqasmoke
+  pilot_manifest: data/processed/docvqasmoke/manifest.jsonl
+  records: results/runs/docvqasmoke_records.jsonl
+  labels: results/runs/docvqasmoke_labels.jsonl
+  router_dir: results/router-docvqasmoke
+
+runner:
+  # Measured to land in four distinct visual-token buckets: 64, 320, 640, 1088.
+  lowres_sizes: [384, 768, 1152]
+  full_longest_side: 2048
+  # This study reads the resolution ladder only. Computing crops and OCR would
+  # triple the run for records it never opens.
+  include_crop: false
+  include_ocr: false
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: false
+    region_longest_side: 768
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  # One timing repeat: the affine token-cost model predicts pass latency to
+  # within 1.7 ms, so repeated timing buys nothing this study reads.
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005
+  lambda_energy_per_mj: 0.000002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 120
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 5000
+  image_dir: data/processed/docvqasmoke/images
+  per_dataset:
+    docvqa: 6

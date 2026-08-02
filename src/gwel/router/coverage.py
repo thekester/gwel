@@ -7,8 +7,8 @@ appear on the same axes.
 
 Escalation is the missing third option. A system facing an uncertain query can
 answer anyway, abstain, or *spend more* and re-decide. ReCoVERR (arXiv
-2402.15610) takes that route to raise coverage — asking sub-questions and
-verifying with an NLI model — but does not report what the extra calls cost.
+2402.15610) takes that route to raise coverage: asking sub-questions
+and verifying with an NLI model, but does not report what the extra calls cost.
 This module computes all three quantities together so the trade-off is visible.
 """
 

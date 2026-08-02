@@ -1,6 +1,6 @@
 """Feature extraction for the supervised router.
 
-Features come from the cheap ANSWER_LOW pass only — the router must decide
+Features come from the cheap ANSWER_LOW pass only, the router must decide
 before any expensive operation runs. They combine the model's confidence
 signals, simple question statistics, image geometry, and the live hardware
 state. All features are deterministic given a record.

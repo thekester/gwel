@@ -35,7 +35,7 @@ def test_logistic_validates_inputs() -> None:
 
 
 def _runs(make_record, n: int = 12):
-    """Small images answer correctly, large ones do not — a learnable pattern."""
+    """Small images answer correctly, large ones do not: a learnable pattern."""
     records = []
     for i in range(n):
         large = i % 2 == 0

@@ -8,7 +8,7 @@ route across a pool of closed-source text LLMs.
 The visual analogue has a sharper motivation. If SmolVLM-256M's activations
 predict whether SmolVLM-500M needs a high-resolution pass, the escalation
 decision is made by a model that is cheaper to run *and* separable from the
-serving path — so the probe never touches the model that answers.
+serving path, so the probe never touches the model that answers.
 
 Usage: python scripts/probe_cross_model.py --source configs/smol256.yaml
 """
