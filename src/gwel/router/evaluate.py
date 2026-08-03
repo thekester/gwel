@@ -1,4 +1,4 @@
-"""Policy evaluation: aggregate metrics, risk–coverage, and Pareto fronts.
+"""Policy evaluation: aggregate metrics, risk-coverage, and Pareto fronts.
 
 Everything here is numpy-only so evaluation of cached runs never needs torch.
 """
@@ -76,7 +76,7 @@ def risk_coverage(
     confidences: Sequence[float],
     corrects: Sequence[bool],
 ) -> RiskCoverageCurve:
-    """Compute the risk–coverage curve and its area (AURC).
+    """Compute the risk-coverage curve and its area (AURC).
 
     Examples are sorted by decreasing confidence; at coverage k/N the risk is
     the error rate among the k most confident predictions. Ties are broken by

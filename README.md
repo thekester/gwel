@@ -47,6 +47,15 @@ python scripts/evaluate_abstention.py     # what a third action is worth, on bot
 python scripts/analyze_domain_confound.py # is the probe reading value, or the dataset?
 python scripts/evaluate_within_domain.py  # does the rule survive inside one domain?
 python scripts/evaluate_ladder.py         # how far to escalate, not just whether
+python scripts/analyze_docvqa_pilot.py    # single-domain pilot: confound and saturation
+python scripts/correct_multiplicity.py    # Holm correction over every paired claim
+python scripts/ablate_policy.py           # what each component is worth, at a fixed budget
+python scripts/compare_saturation.py      # is the resolution ceiling the model's or the data's?
+python scripts/justify_probe_family.py    # would a non-linear probe find more?
+python scripts/justify_calibrator.py      # is isotonic the right calibrator here?
+python scripts/sensitivity_cost_weights.py  # what do the cost weights actually change?
+python scripts/localizer_interval.py      # does the localizer beat random, and by how much?
+python scripts/tokens_two_ways.py         # resolution or position: which buys more per token?
 python scripts/recost_policies.py         # per-example cost model vs the flat one
 python scripts/analyze_cache_sensitivity.py  # can KV reuse refund the probe?
 python scripts/resplit_dominance.py       # does Pareto dominance survive resplitting?
@@ -61,6 +70,15 @@ For a one-example end-to-end validation, replace the config argument with
 `--config configs/smoke.yaml` at each stage; `configs/pilot20.yaml` runs a
 balanced 20-example pilot across all four datasets.
 
+`configs/docvqa1200.yaml` is a single-domain pilot built to answer two questions
+the four-dataset mixture cannot: whether the probe's within-domain collapse is a
+real absence of signal or merely a starved fit, and whether the resolution
+ladder pays when every rung is verified to cost strictly more than the one below
+it. Its rungs were chosen by measuring SmolVLM's patch-grid buckets (64, 320,
+640 and 1088 visual tokens) rather than by picking round pixel sizes, which is
+how the mixture ended up with a "full resolution" pass that was not distinct
+from the rung below it on 56% of its examples.
+
 Per example the oracle runner measures: blind baseline, low-res previews at
 several sizes (ANSWER_LOW), capped full resolution (diagnostic), preview + one
 high-res crop per grid cell (CROP), and preview + OCR transcript (OCR). Each
@@ -69,18 +87,19 @@ margin), visual-token counts, latency (median/IQR/p95 + time-to-first-token),
 peak RAM/VRAM, and energy (RAPL on Linux CPUs, NVML power integration on
 NVIDIA GPUs, minus a measured idle baseline).
 
-Correctness is scored per dataset, VQA accuracy for VQAv2 and TextVQA, ANLS
-for DocVQA, exact match for V*Bench multiple choice: and is recomputed
-offline from the stored answers, so changing the metric never requires
-re-running the model (`--metric vqa` reverts to a single metric everywhere).
+Correctness uses the metric each benchmark defines (VQA accuracy for VQAv2 and
+TextVQA, ANLS for DocVQA, exact match for V*Bench multiple choice) and is
+recomputed offline from the stored answers, so changing the metric never
+requires re-running the model (`--metric vqa` reverts to a single metric
+everywhere).
 
 Package layout:
 
-- `gwel/profiling/`, latency, memory, energy backends, cold-start measurement
-- `gwel/modeling/`, SmolVLM engine, confidence signals, lazy OCR, image ops
-- `gwel/oracle/`, multi-config runner, cost function J, oracle labeling
-- `gwel/router/`, features, MLP distillation, risk–coverage and Pareto evaluation
-- `gwel/data/`, pilot dataset builders and VQA answer metrics
+- `gwel/profiling/` : latency, memory, energy backends, cold-start measurement
+- `gwel/modeling/` : SmolVLM engine, confidence signals, lazy OCR, image ops
+- `gwel/oracle/` : multi-config runner, cost function J, oracle labeling
+- `gwel/router/` : features, calibration, decision rules, Pareto evaluation
+- `gwel/data/` : pilot dataset builders and VQA answer metrics
 
 ## Citation
 

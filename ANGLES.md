@@ -70,6 +70,565 @@ scored *within* each of them before it is believed. The check costs one line.
 
 ---
 
+## 0-localizer. The last untested choice, and the negative that turned into a magnitude
+
+**The reserve the paper carried, discharged: a 4x4 grid, 400 examples, 6800
+crops** (`configs/grid4.yaml`, `scripts/localizer_interval.py`, check P8).
+
+The paper reported that the localizer fails on 2x2 and 3x3, with a stated
+caveat: cells are large, several often contain the answer, and *"a finer grid
+would widen the gap and give the localizer more to find"*. That was a promise,
+so it was tested.
+
+**The promise was right.** On the 400 examples all three grids share, the gap
+between random and oracle widens as cells shrink:
+
+| grid | random | oracle | headroom |
+| --- | --- | --- | --- |
+| 2x2 | 53.3% | 65.5% | 12.2% |
+| 3x3 | 51.2% | 66.0% | 14.8% |
+| 4x4 | 50.8% | 67.0% | **16.2%** |
+
+**And one split is not enough to state a negative.** Resampling 60 times:
+
+| | 2x2 (n=500) | 4x4 (n=400) |
+| --- | --- | --- |
+| depths beating random | 1 of 6 | **4 of 4** |
+| best margin | +0.006 | **+0.009 [0.005, 0.014]** |
+| share of the gap closed |, | **6%** |
+
+At 4x4 the localizer **does** beat random, at every depth, with intervals
+excluding zero. The published claim ("at no depth, on either grid, does it beat
+random") was true of a single split and is too strong under resampling.
+
+**The claim that survives is about magnitude, not sign.** 0.9 accuracy points,
+6% of the gap a perfect localizer would close. Real, and too small to build on.
+We have insisted elsewhere that a null counts only when the interval is tight
+enough to have found an effect; the converse obligation applies here, and the
+paper now states it that way.
+
+**Two errors of mine during this run, both from the same cause.** I reported
+that a finer grid *raises* the random baseline and *collapses* the headroom, and
+built an explanation on crop magnification. It was a comparison between 2x2 on
+1000 examples (four datasets, DocVQA included) and 4x4 on the first 400
+(textvqa and vqav2 only): a dataset effect, not a grid effect. I also called the
+trend "stable" between n=88 and n=179 when both readings fell inside the same
+dataset block. **Two concordant readings of one biased slice are not evidence of
+stability**, and the fix is to compare on the common example set, which is what
+the table above does.
+
+---
+
+## 0-weights. What the cost weights can and cannot change, and one that changes nothing
+
+**The most exposed unjustified choice in the paper, now bounded.**
+
+Eq. (1) prices an error against latency, energy, memory and tokens, justified in
+one sentence: weights set so each resource term contributes 0.03 to 0.09 against
+an error weight of 1.0. That is a convention, and Proposition 1 minimises this
+function, so the question is fair.
+
+**Structural answer first: oracle accuracy cannot depend on the weights.** The
+oracle ranks only among configurations that answered *correctly*, so no lambda
+can make a wrong answer preferable to a right one, and the solvable set is fixed
+before any weight is read. Sweeping every weight over four orders of magnitude
+confirms it to within 1e-9: accuracy stays at 0.694
+(`scripts/sensitivity_cost_weights.py`, check C6).
+
+**And `error_weight` is inert in the labelling.** It is added to options the
+oracle has already discarded, so **100% of labels survive a 10000x change in
+it**. It matters only through the ratio `V = w_e/lambda_t` in the serving rule,
+where it is swept rather than fixed. So our own calibration story, phrased as
+resource terms measured "against an error weight of 1.0", describes something
+the labelling never consults. Nobody had noticed.
+
+**What the weights do choose is which correct action is cheapest:**
+
+| lambda_t factor | label agreement | action mix |
+| --- | --- | --- |
+| 0.01 | 84% | answer_low 30% crop 12% ocr 25% |
+| 1 (nominal) | 100% | answer_low 40% crop 16% ocr 11% |
+| 100 | 75% | answer_low 29% **crop 34%** ocr 2% |
+
+That is not fragility, it is the budget-dependence §5 already reports as a
+finding. The reader's rule: **every accuracy claim here is weight-free, every
+action-mix claim is conditional on a stated budget.**
+
+---
+
+## 0-calibrator. Isotonic was borrowed from UCCI. Is it right here?
+
+**Borrowing a component is how a paper inherits someone else's assumptions.**
+Kotte calibrates a probability in [0, 1] with tens of thousands of points; we
+calibrate a signed gain in [-1, +1] with a few hundred. Different regime,
+untested choice.
+
+Three families, all thresholded at the **same** break-even so any difference is
+the calibrator's magnitudes and not a different operating point
+(`scripts/justify_calibrator.py`, check P7):
+
+| calibrator | AUROC | calib. error | accuracy | vs isotonic |
+| --- | --- | --- | --- | --- |
+| isotonic | 0.660 | 0.059 | **0.736** |, |
+| Platt sigmoid | **0.667** | 0.098 | 0.713 | **−0.022 [−0.026, −0.019]** |
+| equal-mass bins | 0.656 | **0.051** | 0.733 | −0.003 [−0.006, 0.000] |
+
+**The pattern arrives a third time.** The sigmoid ranks *best* and calibrates
+worst, at nearly twice the error, and its policy is significantly less accurate.
+A rule that thresholds a **magnitude** is broken by a miscalibrated magnitude in
+a way a rank threshold would never notice: a parametric squash reports gains the
+operator did not ask for, so the rule lands somewhere other than the point V
+specifies.
+
+**And the honest conclusion is narrower than "isotonic is right".** Equal-mass
+bins are indistinguishable from it. The load-bearing property is being
+**non-parametric**, not being isotonic. Isotonic stays the default because
+monotonicity is free information that binning throws away, but no result rests
+on it, and the paper now says that instead of defending an inherited component.
+
+---
+
+## 0-family. Is the linear probe a choice, or a limitation never tested?
+
+**A rhetorical defence replaced by a measurement.**
+
+The paper defends its difference-of-means probe as "deliberately linear: the
+question is whether the signal is linearly accessible, not how well a classifier
+can be tuned". That is a framing, not evidence, and it matters because the
+central negative result is that the direction carries little within-domain
+signal. If a non-linear probe recovers that signal, the conclusion changes.
+
+Four families, identical folds and targets, 20 resamples
+(`scripts/justify_probe_family.py`, check P6):
+
+| family | pooled mixture | within DocVQA |
+| --- | --- | --- |
+| difference of means (the paper's) | **0.749** | 0.576 |
+| logistic | 0.679 | 0.570 |
+| random Fourier features (non-linear) | 0.699 | **0.596** |
+| shrunk centroid (regularised LDA) | 0.701 | 0.579 |
+| output entropy | 0.735 | **0.656** |
+
+**Two load-bearing conclusions.**
+
+On the mixture the two-centroid difference **beats every fitted alternative** by
+at least 0.048. Fitting parameters on 700 examples in 960 dimensions costs more
+than it recovers, which is the same lesson as `FINDINGS.md` §3b ("every fitted
+model loses to the raw entropy signal it was given"), now measured on the probe
+rather than on free features. The linear choice is justified, not merely
+declared.
+
+Within a domain **no family closes the gap to entropy**: the best reaches 0.596
+against 0.656 [0.645, 0.666]. So the within-domain negative is a property of the
+**representation**, not of linear models. That is the objection this table
+exists to answer.
+
+**Honest limit.** Random Fourier features are one family of non-linearities, not
+a proof that none exists. They are the family a reviewer reaches for first, and
+they were given 512 features on 900 training examples, so if anything the setup
+favours them.
+
+---
+
+## 0-twoways. What the localizer would have been worth, priced
+
+**The comparison the paper asserted against the pruning literature, measured.**
+
+§3.2 argues that token pruning and resolution choice act on different halves of
+the same cost. That is about *where* the cost sits, and it never answers what a
+reviewer will actually ask: given a fixed visual-token budget, is it better to
+see the whole frame coarsely or a piece of it sharply? Both are in the pilot
+(`scripts/tokens_two_ways.py`, check A5), so no new inference was needed.
+
+| family | configuration | tokens | accuracy |
+| --- | --- | --- | --- |
+| resolution | 384 px | 64 | 0.383 |
+| resolution | 768 px | 320 | 0.516 |
+| resolution | full | 320 | 0.549 |
+| crop, **random** cell | 2x2 | **128** | 0.392 |
+| crop, **best** cell | 2x2 | **128** | **0.584** |
+
+**The two readings of the crop row are the whole point.** A randomly chosen cell
+reaches 0.392, which is what the same tokens buy in resolution (0.383 at 64,
+about 0.42 interpolated at 128). The best cell reaches 0.584 and **beats the
+dearest resolution configuration at 2.5x fewer tokens**: +0.035 [0.008, 0.063]
+paired.
+
+So position is worth more per token than resolution, **and only to a policy that
+knows where to look.**
+
+**This prices the failure of §0-localizer.** A working localizer would be the
+most token-efficient action in this action space, which is presumably why AwaRes
+spends cold-start SFT, multi-turn GRPO and a 70B judge to obtain one. Our
+0.9-point margin buys none of that headroom. A negative result is easy to accept
+when the thing that failed is cheap; this one is not.
+
+**A comparator bug I caught while writing it.** My first version picked the
+resolution rung with the *most tokens* as the comparator. Two rungs tie at 320
+tokens and the weaker of them (0.516) was selected, which flattered the crop and
+produced disjoint intervals. Against the *best* rung (`full`, 0.549) the margin
+is real but smaller, and the test had to be paired since both are measured on
+the same examples.
+
+---
+
+## 0-encoder. The ceiling is a resolution, not a sequence length, tested
+
+**The last limitation on the saturation result, removed.**
+
+§0-corpus showed SmolVLM-500M and 256M stop gaining at the same rung. But those
+two share an **86M vision encoder**, so "stops at 1152 px" and "stops at 640
+visual tokens" name the same point and cannot be told apart. SmolVLM2-2.2B has a
+different encoder and tokenises the same pixels differently, which separates
+them (`configs/docvqa1200_2b.yaml`, check R9).
+
+| model | 384 px | 768 px | 1152 px | 2048 px | top step |
+| --- | --- | --- | --- | --- | --- |
+| SmolVLM-500M | 0.279 | 0.662 | **0.748** | 0.746 | −0.002 [−0.026, +0.022] |
+| SmolVLM-256M | 0.220 | 0.588 | **0.653** | 0.666 | +0.013 [−0.012, +0.037] |
+| SmolVLM2-2.2B | 0.413 | 0.669 | **0.738** | 0.754 | +0.016 [−0.011, +0.041] |
+
+**Median visual tokens at each rung:**
+
+| model | 384 px | 768 px | 1152 px | 2048 px |
+| --- | --- | --- | --- | --- |
+| SmolVLM-500M / 256M | 64 | 320 | **640** | 1088 |
+| SmolVLM2-2.2B | 81 | 405 | **810** | 1377 |
+
+**All three stop at the same pixel target while spending different numbers of
+tokens there.** So what runs out is the information in the pixels, not the
+sequence length the model can exploit. Every top-step interval is a tight null
+(half-widths 0.024 to 0.026), so these are measured nulls, not failures to
+measure.
+
+**The saturation point is therefore transportable** across a change of serving
+model *and* of vision encoder: measure it once on a corpus, reuse it. That is a
+much more useful object than a per-model threshold.
+
+**What still cannot be said.** All three models come from one lineage and one
+data recipe, so a shared pretraining corpus remains a possible common cause. The
+limitation moved from "one encoder" to "one family", which is narrower but not
+nothing.
+
+**A check caught a stale guard.** Adding the third model broke R8, whose body
+still read `if len(runs) == 2`. I had fixed that assumption in the comparison
+script and not in the harness, so the harness silently evaluated
+`lower_everywhere = False` and failed. The same edit, applied in one place and
+not the other.
+
+---
+
+## 0-corpus. The saturation ceiling belongs to the corpus, not the model, tested
+
+**The limitation §0-saturation carried, removed by a second collection.**
+
+That result was measured on one serving model, so it could not distinguish two
+explanations. They predict opposite things, which is what makes one run enough:
+
+| hypothesis | prediction for a smaller model |
+| --- | --- |
+| **capacity**, the model runs out of ability to use detail | saturates **earlier** |
+| **legibility**, the pages are readable at that resolution | **same rung**, lower accuracy throughout |
+
+Same 1200 pages, same manifest, same rungs, only the answering model changes
+(`configs/docvqa1200_256m.yaml`, `scripts/compare_saturation.py`, check R8):
+
+| | 64 tok | 320 tok | 640 tok | 1088 tok |
+| --- | --- | --- | --- | --- |
+| SmolVLM-500M | 0.279 | 0.662 | **0.748** | 0.746 |
+| SmolVLM-256M | 0.220 | 0.588 | **0.653** | 0.666 |
+
+| top step, 640 → 1088 | gain [95% CI] | half-width |
+| --- | --- | --- |
+| SmolVLM-500M | −0.002 [−0.026, +0.022] | 0.024 |
+| SmolVLM-256M | +0.013 [−0.011, +0.037] | 0.024 |
+
+**It is legibility.** Halving the parameters costs 6-10 points at every rung and
+moves the ceiling nowhere. Both nulls are tight, so this is two measured nulls
+rather than two failures to measure.
+
+**Why this matters for deployment.** The saturation point is a property of the
+**data**. It can be found once on a corpus and carried across a change of
+serving model, which is a far more useful object than a threshold that has to be
+re-derived per model.
+
+**Honest note.** The 256M point estimate on the top step is *positive* (+0.013),
+leaning opposite to the 500M's −0.002. At these interval widths that is noise,
+and it is reported rather than smoothed into a symmetry the data does not show.
+
+**And I got this wrong in flight.** At n=244 the comparison script printed
+"different rungs, therefore capacity", the exact opposite of the final answer.
+The 256M interval was +0.012 [−0.045, +0.070], which contains zero only because
+the sample could not resolve it. The script now refuses a verdict unless a null
+interval has half-width under 0.05, and prints UNDETERMINED instead. **Without
+that guard I would have reported the reverse conclusion with confidence.**
+
+---
+
+## 0-ablation. Read at a fixed preference, an ablation says the opposite of the truth
+
+**A methodological error I made and caught, worth more than the table it
+produced.**
+
+The first consolidated ablation held V fixed and compared raw accuracy. Every
+removal appeared to *improve* accuracy:
+
+| variant (V=1600, WRONG READING) | accuracy | latency |
+| --- | --- | --- |
+| reference | 0.731 | 418 ms |
+| no ladder | 0.737 | 573 ms |
+| no calibration | 0.743 | 610 ms |
+| always top rung | 0.744 | 621 ms |
+
+Of course they did. **At fixed V nothing stops a variant buying accuracy with
+latency**, so "removing X improves accuracy" is trivially true whenever removing
+X escalates more. That is the exact error this project spends a section warning
+others about, committed on itself.
+
+**Read at a fixed budget instead**, each variant swept to a frontier
+(`scripts/ablate_policy.py`, checks Y1-Y2):
+
+| variant | acc @400 ms | acc @500 ms |
+| --- | --- | --- |
+| **reference** | **0.653** | **0.743** |
+| no per-example pricing | 0.650 (−0.003) | 0.744 (+0.000) |
+| no calibration (tuned rate) | 0.431 (−0.221) | 0.571 (−0.172) |
+| no ladder (binary) | 0.281 (**−0.372**) | 0.622 (−0.121) |
+| no gain target (UCCI) | 0.278 (−0.375) | 0.611 (−0.133) |
+| no signal | 0.278 (−0.375) | 0.278 (−0.465) |
+
+**At 400 ms the ladder is what makes the budget usable at all.** Binary
+escalation reaches 0.281, which is always-cheap to within 0.003, because no
+binary policy can afford the top rung inside that budget.
+
+**And a check caught my prose being wrong.** I wrote that per-example pricing
+has "no effect". Its interval is −0.003 [−0.004, −0.001], which **excludes
+zero**: a real effect, 100x smaller than any other, which is a different
+statement from nothing. Y1 now asserts the accurate version.
+
+---
+
+## 0-qualitative. What the disagreement looks like, one query at a time
+
+**The confound made legible.** Ranking the held-out fold by each signal and
+taking the largest rank disagreements:
+
+| set | DocVQA | TextVQA | VQAv2 | V*Bench |
+| --- | --- | --- | --- | --- |
+| test fold | 30% | 25% | 30% | 15% |
+| probe favours | **50%** | 36% | 12% | 2% |
+| entropy favours | **0%** | 28% | 46% | 26% |
+
+**The disagreement between the two signals predicts the dataset at AUROC
+0.738**, most of what either achieves on the escalation target itself. Not one
+query entropy prefers is a document page.
+
+The individual cases are unambiguous. The four the probe most wants to escalate
+are all DocVQA, 448-640 tokens, all with G=0: *"What is written in big letters
+on the top right?"* is answered **correctly** at 384 px and escalation changes
+nothing. The four entropy most wants are all VQAv2 photographs at 320 tokens,
+wrong at both resolutions: *"What is tucked behind the lamp?"*, where the model
+is genuinely lost and pixels do not help.
+
+Read as a routing signal, the probe escalates a correct answer on a large page
+and declines a hopeless one on a small photograph, and neither decision used
+anything about the query. Check E3.
+
+---
+
+## 0-multiplicity. The correction the paper conceded it lacked, run
+
+**A hedge replaced by a result.** The limitations section said the paired AUROC
+comparison "would not survive an aggressive multiple-comparison correction and
+should be read as suggestive". That is cheap to test rather than concede.
+
+Thirteen paired comparisons reconstructed from the run records, each bootstrap
+converted to a two-sided p-value, Holm step-down over the family
+(`gwel/router/multiplicity.py`, `scripts/correct_multiplicity.py`):
+
+| outcome | count |
+| --- | --- |
+| clear the nominal 5% level | 9 / 13 |
+| **survive Holm** | **9 / 13** |
+| lost to the correction | **0** |
+
+Uncorrected, thirteen tests carry a **49%** chance of at least one false
+positive. Nothing is lost because the surviving effects sit at the bootstrap's
+resolution floor (p = 0.0001, adjusted 0.0013) while the failures are
+unambiguous nulls (p = 0.17 to 1.00).
+
+**The split is the interesting part, and it certifies the paper's claim
+structure.** Every surviving comparison is about **cost**:
+
+- 7/7 latency comparisons survive.
+- **0/3 probe-versus-entropy accuracy comparisons** clear the nominal level.
+- The top rung's gain (§0-saturation) does not clear either, which is the
+  saturation null holding under correction.
+
+So what this project demonstrates is *cheaper compute at accuracy the data
+cannot separate*, not better answers. That was already the honest reading; it is
+now certified rather than asserted. Checks X1-X2, where X2 exists to fail loudly
+if an accuracy claim ever starts surviving, since that would mean the story
+changed.
+
+**Holm rather than Bonferroni** because it is uniformly more powerful and needs
+no independence assumption, which matters here: the tests reuse the same
+examples and are strongly dependent.
+
+---
+
+## 0-theory. When the rule is optimal, and how it relates to UCCI's theorem
+
+**A gap found by reading the papers for structure rather than for results.**
+
+UCCI states a theorem; AwaRes and GlimpsePrune state a problem setup; this
+project derived its decision rule and never said under what conditions it is
+right. Now stated and proved (paper, Proposition 1):
+
+> Under the linear cost with `w_e, lambda_t > 0`, and given the calibrated gain
+> `g(s) = E[G | s]`, the policy `escalate iff g(s) > dt/V` minimises expected
+> cost over policies measurable with respect to the score. If `g` is
+> non-decreasing it is a threshold on the score itself.
+
+The proof is three lines: the objective is linear in the decision, so it is
+minimised pointwise; the tower property moves the conditional expectation onto
+the score; isotonic regression supplies monotonicity by construction.
+
+**The relation to Kotte's Theorem 1 is exact, and better than "they are
+wrong".** Under their assumption that the escalated pass attains a fixed
+accuracy `gamma` regardless of which queries reach it,
+`E[G|x] = gamma - (1 - p_err(x))`, which is increasing in the weak model's error
+probability. **The two rules coincide precisely when escalation cannot make
+things worse.** Our §0-new table is what their difference costs when it can.
+That is a generalisation, not a refutation, and the paper now says so.
+
+**The ladder extends without a new argument.** Escalating to rung r shifts cost
+by `-w_e·E[G_r|x] + lambda_t·dt_r`; the choice is pointwise for the same reason;
+the best action is the argmin. So the binary policy is not a simplification of
+the ladder but a **constrained** version of it, forced to pick between two of
+the rungs it has.
+
+---
+
+## 0-power. My ladder interval was computed at the wrong level, corrected
+
+**A statistics error of my own, caught while writing it up.**
+
+The ladder-versus-binary comparison bootstrapped the four *preference means*:
+four numbers resampled, giving −91.5 [−157.8, +25.8] ms, an interval four points
+wide that spanned zero and looked like a null result. The 30 resamples that
+produced each mean were being thrown away.
+
+Paired inside each operating point instead:
+
+| V | accuracy delta | latency delta (ms) |
+| --- | --- | --- |
+| 400 | +0.359 [+0.346, +0.374] | +86.0 [+84.3, +87.4] |
+| 800 | −0.010 [−0.019, −0.001] | **−161.1 [−163.9, −158.4]** |
+| 1600 | −0.010 [−0.017, −0.003] | −154.5 [−158.3, −150.7] |
+| 3200 | −0.002 [−0.009, +0.005] | **−136.4 [−141.1, −132.0]** |
+
+**Significantly cheaper at 3 of 4 operating points**, and at the highest
+preference cheaper at accuracy the comparison cannot separate. The lesson is the
+one this project keeps relearning: the unit you resample decides what you can
+detect, and aggregating before bootstrapping discards the power you paid for.
+Check R6.
+
+---
+
+## 0-curve. The confound is real, and neither of my two hypotheses was right, tested
+
+**The learning curve that §0-audit demanded, run on a pilot built for it.**
+
+§0-audit found the probe at chance within a domain, with an honest caveat: the
+within-domain fit gets 210 training examples where the pooled fit gets 600, so
+part of the collapse could be starvation. `configs/docvqa1200.yaml` removes that
+confound. Fixed 300-example held-out set, training size varied, 30 resamples.
+
+| train n | probe AUROC [95% CI] | entropy (no fit) |
+| --- | --- | --- |
+| 100 | 0.523 [0.511, 0.534] | 0.663 |
+| 200 | 0.535 [0.523, 0.547] | 0.663 |
+| 400 | 0.558 [0.548, 0.568] | 0.663 |
+| 600 | 0.567 [0.556, 0.578] | 0.663 |
+| **900** | **0.572 [0.563, 0.581]** | **0.663** |
+
+**Neither extreme.** The probe *does* improve, +0.050 as data grows 9x, so the
+collapse was not pure starvation. But it plateaus far below output entropy,
+which is fitted on nothing, at a training size (900) larger than the pooled fit
+(600) that produced 0.761. **The signal is genuinely weaker inside a domain than
+the pooled figure suggests.** The §0-audit conclusion stands in this corrected
+form rather than as "at chance". Check R4, renamed to match what it measures.
+
+**And a second mixture artefact I had not anticipated.** Depth at n=900:
+
+| layer | 1 | 3 | 6 | 12 | 20 | 32 |
+| --- | --- | --- | --- | --- | --- | --- |
+| AUROC | 0.531 | 0.546 | 0.572 | 0.579 | 0.618 | **0.625** |
+
+Layer 6 was selected because AUROC saturates there *on the mixture*, and the
+entire read-cost argument rests on stopping a sixth of the way through. Inside
+one domain the signal keeps improving to the last layer. That costs the probe
+its cheap read: the read rises from 20.0 to 59.1 ms and the saving per escalated
+query falls from 106.9 to **67.8 ms**. Check R5.
+
+**Two independent analyses converge on the same number.** That residual 67.8 ms
+is exactly the decode time, and it is the same floor §0-cache reached from the
+KV-reuse direction. The probe's advantage reduces to one mechanism, stated
+twice: **reading the model without making it speak.**
+
+---
+
+## 0-saturation. More pixels stop helping well below what the model accepts, tested
+
+**Measured on a pilot built for the question**: 1200 DocVQA pages,
+`configs/docvqa1200.yaml`, rungs chosen by measuring SmolVLM's patch-grid
+buckets (64 / 320 / 640 / 1088 visual tokens) instead of picking round pixel
+sizes. Every rung is strictly dearer than the one below on 95-100% of images,
+against 44% in the mixture. Latency is affine at `205.0 + 0.415·v` ms, worst
+residual 20.2 ms.
+
+| rung | tokens | ms | ANLS accuracy [95% CI] |
+| --- | --- | --- | --- |
+| 384 px | 64 | 232 | 0.279 [0.253, 0.303] |
+| 768 px | 320 | 336 | 0.662 [0.633, 0.690] |
+| 1152 px | 640 | 465 | **0.748 [0.724, 0.771]** |
+| 2048 px | 1088 | 621 | 0.746 [0.721, 0.769] |
+
+**Accuracy peaks at 640 tokens and stops.** The step above it:
+
+| step | net gain [95% CI] | cost | points/s |
+| --- | --- | --- | --- |
+| 64 → 320 | +0.383 [0.352, 0.414] | 105 ms | **+3.65** |
+| 320 → 640 | +0.086 [0.060, 0.111] | 129 ms | +0.67 |
+| 640 → 1088 | **-0.002 [-0.026, 0.022]** | 156 ms | -0.01 |
+
+The top step **repairs 8.1% of queries and damages 8.3%**: a wash costing
+156 ms. Of everything escalation can repair, 93% is repaired below the top rung
+and only 4.2% needs it. 13.0% is unsolvable at any rung.
+
+**Why this is stronger than §S3.** That finding was "escalation harms 4.1% of
+queries", a nuisance term. This is a *ceiling*: past 640 visual tokens the harm
+rate catches the repair rate exactly, so the expected value of more resolution
+is zero rather than small. And it is measured on document pages, the regime
+where resolution matters most, so it is not a low-detail artefact.
+
+**The ladder rule finds it without being told.** Given rungs and prices,
+`LadderRule` selects the top rung on 0-5% of queries across the whole preference
+range. Against the binary policy on a held-out 300: at V=800 it reaches 0.687 at
+327 ms where binary reaches 0.690 at 489 ms (**33% cheaper for three
+thousandths**), and at V=3200 it is both more accurate and 22% cheaper. The
+mixture measured this effect at −9.6 ms because most of its ladder did not
+exist.
+
+**A measurement note worth keeping.** The first cost fit on this run had a worst
+residual of 387.8 ms. The cause was a token bucket seen **twice** whose median
+sat 300 ms off the line. `fit_token_cost` reports the worst residual precisely so
+a bad fit is visible instead of silent; filtering buckets under 50 passes brings
+the residual to 20.2 ms. Checks R1-R3.
+
+---
+
 ## 0-ladder. How far to escalate is the decision the field collapses, tested
 
 **Deferred twice, and it turned out to hide a fourth measurement error.**

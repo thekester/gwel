@@ -20,7 +20,7 @@ intervals. Forty examples is small: read the direction, not the third digit.
 
 > **Every claim below is checked by `scripts/validate_claims.py`**, which
 > re-derives it from the data with an explicit threshold and fails loudly if it
-> stops holding. Current state: 37 checks, 37 passing. Claims that are stated
+> stops holding. Current state: 56 checks, 56 passing. Claims that are stated
 > here but *not* covered by a check should be treated as unverified.
 
 > **A Pareto-dominance claim made elsewhere in this repository was
@@ -49,6 +49,32 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > fixed tuned rate: 0.489 accuracy at 181.6 ms against 0.464 at 195.1 ms. The
 > method is signal-agnostic; the signal was the part that failed. See
 > `ANGLES.md` §0-transfer, checks W1-W3.
+
+> **A single-domain pilot settles the confound, in a corrected form.** On 1200
+> DocVQA pages the probe improves with data (+0.050 as training grows ninefold)
+> but plateaus at 0.572 against output entropy's 0.663, at a training size
+> larger than the pooled fit that produced 0.761. Not starvation, and not "at
+> chance": the signal is genuinely weaker inside a domain. Layer 6 is also a
+> mixture artefact, the best within-domain depth being the last layer, which
+> cuts the probe's saving per escalation from 106.9 to 67.8 ms. See `ANGLES.md`
+> §0-curve, checks R4-R5.
+
+> **Escalation value saturates at 640 visual tokens.** On the same pilot, going
+> from 640 to 1088 tokens gains -0.002 [-0.026, +0.022] for 156 ms: the top step
+> repairs 8.1% of queries and damages 8.3%. 93% of what escalation repairs is
+> repaired below the top rung. See `ANGLES.md` §0-saturation, checks R1-R3.
+
+> **And the ceiling belongs to the corpus, not the model.** Re-running the whole
+> ladder on SmolVLM-256M over the same 1200 pages: it loses 6-10 accuracy points
+> at every rung and saturates at the same one (top step +0.013 [-0.011, +0.037]
+> against the 500M's -0.002 [-0.026, +0.022], both tight). Legibility, not
+> capacity, so the saturation point can be measured once per corpus and carried
+> across a change of serving model. See `ANGLES.md` §0-corpus, check R8.
+
+> **And the ceiling is a pixel resolution, not a token budget.** SmolVLM2-2.2B
+> has a different vision encoder and spends 810 visual tokens where the others
+> spend 640, yet stops gaining at the same pixel target. What runs out is the
+> information in the pixels. See `ANGLES.md` §0-encoder, check R9.
 
 > **For 56% of the pilot the "full resolution" configuration is not a distinct
 > configuration.** The processor caps its target at the input's longest side, so

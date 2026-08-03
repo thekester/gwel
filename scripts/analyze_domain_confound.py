@@ -232,6 +232,52 @@ def main() -> None:
         f"output entropy at {entropy_here:.3f}. No layer rescues it."
     )
 
+    # --- what the disagreement between the two signals actually is ---------
+    # A statistic can say the probe tracks image size; this says what that means
+    # for the queries a deployment would route differently.
+    def ranked(values: np.ndarray) -> np.ndarray:
+        out = np.empty(len(values))
+        out[np.argsort(values)] = np.arange(len(values))
+        return out / len(values)
+
+    disagreement = ranked(score[test]) - ranked(entropy[test])
+    fold_datasets = datasets[test]
+    order = np.argsort(disagreement)
+    top = 50
+    print()
+    print(f"disagreement between the signals, top {top} each way:")
+    header = sorted(set(fold_datasets))
+    print(f"{'set':<18}" + "".join(f"{d:>10}" for d in header))
+    composition = {}
+    for label, index in (
+        ("test fold", np.arange(len(test))),
+        ("probe favours", order[::-1][:top]),
+        ("entropy favours", order[:top]),
+    ):
+        share = {
+            d: float((fold_datasets[index] == d).mean()) for d in header
+        }
+        composition[label] = share
+        print(f"{label:<18}" + "".join(f"{share[d]:>10.0%}" for d in header))
+
+    dataset_auroc = {
+        d: auroc(
+            (disagreement if d == "docvqa" else -disagreement).tolist(),
+            [bool(x) for x in (fold_datasets == d)],
+        )
+        for d in ("docvqa", "vqav2")
+    }
+    print()
+    print(
+        "the disagreement predicts the dataset at AUROC "
+        + ", ".join(f"{d} {v:.3f}" for d, v in dataset_auroc.items())
+        + ": where the signals differ, they differ about what kind of image it is"
+    )
+    results["disagreement"] = {
+        "composition": composition,
+        "dataset_auroc": dataset_auroc,
+    }
+
     Path(args.out).write_text(json.dumps(results, indent=2))
     print(f"\nwrote {args.out}")
 

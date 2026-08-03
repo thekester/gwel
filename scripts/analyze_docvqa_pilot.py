@@ -43,6 +43,7 @@ HELDOUT = 300  # fixed, so only the training size varies across the curve
 LAYERS = (1, 3, 6, 12, 20, 32)
 RESAMPLES = 30
 VALUE_GRID = (400.0, 800.0, 1600.0, 3200.0)
+MIN_BUCKET = 50  # passes a token bucket needs before it may set the cost line
 
 
 def main() -> None:
@@ -100,13 +101,24 @@ def main() -> None:
     for example in usable:
         for record in grouped[example].values():
             by_tokens[int(record.visual_tokens)].append(record.latency_ms)
-    observed_tokens = sorted(by_tokens)
+
+    # Sparse buckets are noise, not measurements: a bucket seen twice can sit
+    # 300 ms off the line and drag the slope with it. The model's own residual
+    # is what exposes this, so it is reported either way.
+    observed_tokens = sorted(t for t in by_tokens if len(by_tokens[t]) >= MIN_BUCKET)
+    dropped = sorted(t for t in by_tokens if len(by_tokens[t]) < MIN_BUCKET)
     observed_ms = [float(np.median(by_tokens[t])) for t in observed_tokens]
     cost_model = fit_token_cost(observed_tokens, observed_ms)
     print(
-        "token buckets observed: "
-        + ", ".join(f"{t} ({len(by_tokens[t])} passes)" for t in observed_tokens)
+        "token buckets fitted: "
+        + ", ".join(f"{t} (n={len(by_tokens[t])})" for t in observed_tokens)
     )
+    if dropped:
+        print(
+            "  dropped as under-sampled: "
+            + ", ".join(f"{t} (n={len(by_tokens[t])})" for t in dropped)
+        )
+    print(f"  worst residual {cost_model.residual_ms:.1f} ms")
 
     profile = json.loads(Path(args.latency).read_text())
     extrapolated = fit_token_cost(
@@ -169,6 +181,44 @@ def main() -> None:
 
     # --- which rung does each query need? ----------------------------------
     rung_order = (CHEAP, *RUNGS)
+    # --- where does escalation value saturate? -----------------------------
+    # The rung-to-rung gain, with an interval, so "stops helping" is a measured
+    # statement and not an eyeballed plateau.
+    print(f"\n{'step':<26}{'net gain [95% CI]':>28}{'cost':>8}{'points/s':>11}")
+    steps = []
+    for low, high in zip(rung_order[:-1], rung_order[1:]):
+        gain = (correct[high] & ~correct[low]).astype(float) - (
+            correct[low] & ~correct[high]
+        ).astype(float)
+        interval = bootstrap_interval(gain.tolist())
+        extra = float((latency[high] - latency[low]).mean())
+        steps.append(
+            {
+                "from": low,
+                "to": high,
+                "net_gain": interval.estimate,
+                "low": interval.low,
+                "high": interval.high,
+                "extra_ms": extra,
+                "points_per_second": interval.estimate / extra * 1000.0,
+            }
+        )
+        label = f"{low.replace('lowres_', '')} -> {high.replace('lowres_', '')}"
+        print(
+            f"{label:<26}{str(interval):>28}{extra:>8.0f}"
+            f"{interval.estimate / extra * 1000:>+11.2f}"
+        )
+    results["steps"] = steps
+
+    saturated = [s for s in steps if s["low"] <= 0.0 <= s["high"]]
+    if saturated:
+        first = saturated[0]
+        print(
+            f"\nescalation value saturates at {first['from']}: the step above it is "
+            f"indistinguishable from zero while costing {first['extra_ms']:.0f} ms"
+        )
+        results["saturation_rung"] = first["from"]
+
     cheapest = np.full(len(usable), -1)
     for index in range(len(usable)):
         for level, config_id in enumerate(rung_order):
@@ -308,14 +358,29 @@ def main() -> None:
         if not binary_acc:
             continue
         mix = np.mean(mixes, axis=0)
+        # Pair within an operating point, over the resamples that produced it.
+        # Bootstrapping the four preference means instead would resample four
+        # numbers and report an interval four points wide, which is what an
+        # earlier version of this script did.
+        accuracy_delta = bootstrap_interval(
+            [a - b for a, b in zip(ladder_acc, binary_acc)]
+        )
+        latency_delta = bootstrap_interval([a - b for a, b in zip(ladder_ms, binary_ms)])
         comparison.append(
             {
                 "value": value,
+                "resamples": len(binary_acc),
                 "binary_accuracy": float(np.mean(binary_acc)),
                 "binary_ms": float(np.mean(binary_ms)),
                 "ladder_accuracy": float(np.mean(ladder_acc)),
                 "ladder_ms": float(np.mean(ladder_ms)),
                 "ladder_mix": mix.tolist(),
+                "accuracy_delta": [
+                    accuracy_delta.estimate, accuracy_delta.low, accuracy_delta.high
+                ],
+                "latency_delta": [
+                    latency_delta.estimate, latency_delta.low, latency_delta.high
+                ],
             }
         )
         print(
@@ -327,20 +392,22 @@ def main() -> None:
             f"{'/'.join(f'{m:.0%}' for m in mix):>26}"
             f"{np.mean(ladder_acc):>10.3f}{np.mean(ladder_ms):>10.1f}"
         )
+        print(
+            f"{'  paired delta':<18}{'':>26}"
+            f"{accuracy_delta.estimate:>+10.3f}{latency_delta.estimate:>+10.1f}"
+            f"   accuracy [{accuracy_delta.low:+.3f}, {accuracy_delta.high:+.3f}]"
+            f"  latency [{latency_delta.low:+.1f}, {latency_delta.high:+.1f}]"
+        )
     results["ladder_vs_binary"] = comparison
 
-    if comparison:
-        accuracy_delta = bootstrap_interval(
-            [row["ladder_accuracy"] - row["binary_accuracy"] for row in comparison]
-        )
-        latency_delta = bootstrap_interval(
-            [row["ladder_ms"] - row["binary_ms"] for row in comparison]
-        )
-        print(f"\nladder minus binary: accuracy {accuracy_delta}, latency {latency_delta} ms")
-        results["ladder_delta"] = {
-            "accuracy": [accuracy_delta.estimate, accuracy_delta.low, accuracy_delta.high],
-            "latency": [latency_delta.estimate, latency_delta.low, latency_delta.high],
-        }
+    cheaper = [
+        row for row in comparison if row["latency_delta"][2] < 0.0
+    ]
+    print(
+        f"\nthe ladder is significantly cheaper at {len(cheaper)}/{len(comparison)} "
+        f"operating points"
+    )
+    results["ladder_cheaper_points"] = len(cheaper)
 
     Path(args.out).write_text(json.dumps(results, indent=2))
     print(f"\nwrote {args.out}")
