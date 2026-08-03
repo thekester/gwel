@@ -1268,22 +1268,27 @@ def _():
     )
 
 
-@check("X1: no claim is lost to family-wise error correction")
+@check("X1: exactly one claim is lost to the correction, and it is the headline ranking")
 def _():
-    """The paper asked thirteen paired questions; Holm says which to believe.
+    """The paper asked fourteen paired questions; Holm says which to believe.
 
-    Uncorrected, thirteen tests at the nominal level carry a 49% chance of at
-    least one false positive. This asserts the stronger property: every
-    comparison that clears the nominal level also survives the step-down.
+    Every cost claim survives. The one loss is the abstract's most visible
+    number, the probe's AUROC advantage on the recovery target: nominally
+    significant, adjusted p above 0.05. Asserted so the paper cannot quietly
+    restate that advantage as established.
     """
     summary = json.loads(Path("results/multiplicity.json").read_text())
     nominal, survivors = summary["nominal"], summary["survivors"]
     total = len(summary["tests"])
-    ok = survivors == nominal and survivors > 0
+    lost = [
+        t["name"] for t in summary["tests"]
+        if t["p_value"] <= summary["alpha"] and not t["survives"]
+    ]
+    ok = survivors == nominal - 1 and lost and "AUROC" in lost[0]
     return ("PASS" if ok else "FAIL"), (
         f"{nominal}/{total} clear the nominal level, {survivors} survive Holm; "
-        f"uncorrected family-wise error would be "
-        f"{summary['family_wise_error_uncorrected']:.0%}"
+        f"lost: {lost[0] if lost else 'none'} "
+        f"(uncorrected family-wise error {summary['family_wise_error_uncorrected']:.0%})"
     )
 
 
@@ -1609,6 +1614,156 @@ def _():
         f"[{delta[1]:+.3f}, {delta[2]:+.3f}] at {summary['token_ratio']:.1f}x fewer "
         f"tokens; a random crop reaches {random_crop['accuracy']:.3f} against "
         f"{cheap['accuracy']:.3f} for the cheapest rung"
+    )
+
+
+@check("CV1: adaptive routing clears the no-signal baseline only where its read is cheap or its actions graded")
+def _():
+    """Randomising between fixed configurations traces the convex hull; an
+    adaptive policy that cannot beat the hull bought nothing with its signal.
+
+    Three facts, all load-bearing. The probe clears the hull on the mixture,
+    by most at tight budgets. The entropy threshold, the field's standard
+    baseline, sits at or below the hull at every operating point, because its
+    read requires the pass it prices. And the ladder clears the hull on the
+    homogeneous pilot, where binary escalation does not.
+    """
+    summary = json.loads(Path("results/convexity.json").read_text())
+    mix, doc = summary["mixture"], summary["docvqa"]
+    probe_gaps = [v["gap"] for k, v in mix.items() if k.startswith("probe")]
+    entropy_gaps = [v["gap"] for k, v in mix.items() if k.startswith("entropy")]
+    ladder_gaps = [v["gap"] for k, v in doc.items()]
+    probe_clears = all(g[1] > 0.0 for g in probe_gaps)
+    probe_shrinks = probe_gaps[0][0] > probe_gaps[-1][0]
+    entropy_fails = all(g[1] <= 0.005 for g in entropy_gaps)
+    ladder_clears = all(g[1] > 0.0 for g in ladder_gaps)
+    # The same must hold under the frontier figure's parameterisation, or the
+    # claim would depend on how the operating point is chosen: rate-swept, the
+    # best entropy point must be indistinguishable from the chord and every
+    # probe point must clear it.
+    rates = summary["mixture_rates"]
+    rate_entropy = [v["gap"] for k, v in rates.items() if k.startswith("entropy")]
+    rate_probe = [v["gap"] for k, v in rates.items() if k.startswith("probe")]
+    rates_ok = (
+        all(g[1] <= 0.005 for g in rate_entropy)
+        and max(g[0] for g in rate_entropy) < 0.01
+        and all(g[1] > 0.0 for g in rate_probe)
+    )
+    ok = (
+        probe_clears and probe_shrinks and entropy_fails and ladder_clears and rates_ok
+    )
+    return ("PASS" if ok else "FAIL"), (
+        f"probe gap {probe_gaps[0][0]:+.3f} to {probe_gaps[-1][0]:+.3f} (all CIs > 0); "
+        f"entropy gap {min(g[0] for g in entropy_gaps):+.3f} to "
+        f"{max(g[0] for g in entropy_gaps):+.3f} (never clears); "
+        f"ladder gap {ladder_gaps[-1][0]:+.3f} to {ladder_gaps[0][0]:+.3f} (all clear); "
+        f"rate-swept: best entropy {max(g[0] for g in rate_entropy):+.3f} vs chord, "
+        f"probe clears at all rates"
+    )
+
+
+@check("P9: the probe depth is selected on the validation fold, which picks layer 6")
+def _():
+    """Guards against selecting the layer on the curve the paper plots.
+
+    Fig. layers shows test AUROC by depth; if the layer had been chosen from
+    it, the headline would be optimistic by a selection on the test fold. The
+    validation fold makes the same choice independently.
+    """
+    from gwel.router.probes import fit_layer_probe
+    from gwel.router.evaluate import auroc
+    from gwel.router.splits import make_split
+
+    stored = np.load("results/activations_full.npz", allow_pickle=True)
+    acts, ids = stored["activations"], [str(e) for e in stored["example_ids"]]
+    grouped = _grouped(PILOT)
+    usable = [
+        e for e in ids
+        if "lowres_384" in grouped[e] and "full" in grouped[e]
+        and grouped[e]["lowres_384"].signals
+    ]
+    position = {e: i for i, e in enumerate(ids)}
+    matrix = acts[[position[e] for e in usable]]
+    cheap = np.array([grouped[e]["lowres_384"].correct for e in usable])
+    full = np.array([grouped[e]["full"].correct for e in usable])
+    split = make_split(
+        usable, [grouped[e]["lowres_384"].dataset for e in usable],
+        val_fraction=0.2, test_fraction=0.2, seed=1234,
+    )
+    order = {e: i for i, e in enumerate(usable)}
+    train = np.array([order[e] for e in split.train])
+    val = np.array([order[e] for e in split.val])
+    trf, vaf = train[~cheap[train]], val[~cheap[val]]
+    scores = {}
+    for layer in range(matrix.shape[1]):
+        probe = fit_layer_probe(matrix[trf, layer, :], full[trf].astype(float), layer)
+        scores[layer] = auroc(
+            probe.score(matrix[vaf, layer, :]).tolist(), [bool(x) for x in full[vaf]]
+        )
+    best = max(scores, key=scores.get)
+    ok = best == 6
+    return ("PASS" if ok else "FAIL"), (
+        f"validation selects layer {best} (val AUROC {scores[best]:.3f}); "
+        f"layer 6 val AUROC {scores[6]:.3f}"
+    )
+
+
+@check("Q1: the qualitative cases are archetypes of their recorded outcome, not curated answers")
+def _():
+    """The three pages in fig:qualitative must match the records they claim to
+    illustrate, and the caption shares must re-derive from the full corpus."""
+    art = json.loads(Path("results/qualitative_cases.json").read_text())
+    grouped = _grouped("results/runs/docvqa1200_records.jsonl")
+    rungs = ("lowres_384", "lowres_768", "lowres_1152", "full")
+    ids = [e for e in grouped if all(c in grouped[e] for c in rungs)]
+    ok = {e: {c: grouped[e][c].correct for c in rungs} for e in ids}
+    n = len(ids)
+    shares = {
+        "thumbnail_suffices": sum(ok[e]["lowres_384"] for e in ids) / n,
+        "fixed_by_1152": sum(
+            not ok[e]["lowres_384"] and ok[e]["lowres_1152"] for e in ids
+        ) / n,
+        "no_rung_helps": sum(not any(ok[e].values()) for e in ids) / n,
+    }
+    for key, value in shares.items():
+        if abs(art["shares"][key] - value) > 1e-9:
+            return "FAIL", f"{key} artefact {art['shares'][key]:.4f} != {value:.4f}"
+    cases = art["cases"]
+    patterns = (
+        cases["docvqa-18"]["correct"]["lowres_384"],
+        not cases["docvqa-88"]["correct"]["lowres_384"]
+        and cases["docvqa-88"]["correct"]["lowres_1152"],
+        not any(cases["docvqa-5"]["correct"].values()),
+    )
+    if not all(patterns):
+        return "FAIL", f"case patterns broken: {patterns}"
+    for eid, case in cases.items():
+        for c in rungs:
+            if case["answers"][c] != grouped[eid][c].answer:
+                return "FAIL", f"{eid}/{c} answer differs from record"
+    return "PASS", (
+        f"n={n}, shares {shares['thumbnail_suffices']:.3f}/"
+        f"{shares['fixed_by_1152']:.3f}/{shares['no_rung_helps']:.3f}, "
+        "all three patterns and answers match the records"
+    )
+
+
+@check("Q2: downsampling is nearly free on photographs and fatal on documents")
+def _():
+    """fig:domainbars numbers, re-derived: the full-minus-thumbnail gap spans
+    an order of magnitude across datasets, and the V*Bench thumbnail is
+    indistinguishable from blind."""
+    bars = json.loads(Path("results/domain_bars.json").read_text())
+    if sum(bars[d]["n"] for d in bars) != 1000:
+        return "FAIL", f"pilot sizes sum to {sum(bars[d]['n'] for d in bars)}"
+    vqa_gap = bars["vqav2"]["full"] - bars["vqav2"]["lowres_384"]
+    doc_gap = bars["docvqa"]["full"] - bars["docvqa"]["lowres_384"]
+    vstar_gap = bars["vstar"]["lowres_384"] - bars["vstar"]["no_image"]
+    ok = vqa_gap <= 0.05 and doc_gap >= 0.30 and abs(vstar_gap) <= 0.05
+    return ("PASS" if ok else "FAIL"), (
+        f"full minus 384: vqav2 {vqa_gap:+.3f} (need <=0.05), docvqa "
+        f"{doc_gap:+.3f} (need >=0.30); vstar 384 minus blind {vstar_gap:+.3f} "
+        f"(need |x|<=0.05)"
     )
 
 

@@ -154,6 +154,74 @@ def single_domain_tests() -> list[tuple[str, list[float]]]:
     return tests
 
 
+
+
+def auroc_p_value(
+    scores_a,
+    scores_b,
+    labels,
+    *,
+    resamples: int = 10000,
+    seed: int = 1234,
+) -> float:
+    """Two-sided bootstrap p-value for a paired AUROC difference.
+
+    AUROC is not a per-example mean, so the generic converter does not apply;
+    examples are resampled jointly and the AUROC difference recomputed, which
+    preserves the pairing between the two scores on each draw.
+    """
+    from gwel.router.evaluate import auroc
+
+    scores_a = np.asarray(scores_a, dtype=np.float64)
+    scores_b = np.asarray(scores_b, dtype=np.float64)
+    labels = np.asarray(labels, dtype=bool)
+    rng = np.random.default_rng(seed)
+    n = len(labels)
+    observed = auroc(scores_a.tolist(), [bool(x) for x in labels]) - auroc(
+        scores_b.tolist(), [bool(x) for x in labels]
+    )
+    if observed == 0.0:
+        return 1.0
+    wrong = 0
+    draws = 0
+    for _ in range(resamples):
+        idx = rng.integers(0, n, n)
+        lab = labels[idx]
+        if lab.all() or not lab.any():
+            continue
+        delta = auroc(scores_a[idx].tolist(), [bool(x) for x in lab]) - auroc(
+            scores_b[idx].tolist(), [bool(x) for x in lab]
+        )
+        draws += 1
+        if (delta <= 0) if observed > 0 else (delta >= 0):
+            wrong += 1
+    return float(min(1.0, max(2.0 * wrong / max(draws, 1), 1.0 / max(draws, 1))))
+
+
+def headline_auroc_test():
+    """The abstract's most visible number, previously outside the family.
+
+    Probe against entropy on the conditional recovery target, over the
+    test-fold failures: the +0.143 [+0.031, +0.264] claim of the abstract.
+    """
+    config = load_config(MIXTURE)
+    cheap_ok, full_ok, entropy, matrix, folds = load_arrays(
+        config, "results/activations_full.npz", LAYER
+    )
+    train, test = folds["train"], folds["test"]
+    train_failures = train[~cheap_ok[train]]
+    test_failures = test[~cheap_ok[test]]
+    probe = fit_layer_probe(
+        matrix[train_failures], full_ok[train_failures].astype(float), LAYER
+    )
+    p = auroc_p_value(
+        probe.score(matrix[test_failures]),
+        entropy[test_failures],
+        full_ok[test_failures],
+    )
+    return ("P1 AUROC: probe vs entropy on the recovery target", p)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--alpha", type=float, default=0.05)
@@ -168,11 +236,15 @@ def main() -> None:
             print(f"skipping {source.__name__}: missing {error.filename}")
 
     scored = [(name, bootstrap_p_value(values)) for name, values in family]
+    try:
+        scored.append(headline_auroc_test())
+    except FileNotFoundError as error:
+        print(f"skipping headline AUROC: missing {error.filename}")
     corrected = holm_bonferroni(scored, alpha=args.alpha)
 
     print(
-        f"{len(family)} paired tests. Uncorrected, the chance of at least one "
-        f"false positive is {family_wise_error(len(family), alpha=args.alpha):.0%}.\n"
+        f"{len(scored)} paired tests. Uncorrected, the chance of at least one "
+        f"false positive is {family_wise_error(len(scored), alpha=args.alpha):.0%}.\n"
     )
     width = max(len(name) for name, _ in scored) + 2
     print(f"{'test':<{width}}{'p':>10}{'Holm p':>10}{'survives':>10}")

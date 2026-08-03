@@ -53,8 +53,15 @@ def summarise(config_path: str) -> dict:
     for e in ids:
         for record in grouped[e].values():
             by[int(record.visual_tokens)].append(record.latency_ms)
+    # A dynamic-resolution encoder gives each image its own token count, so
+    # bucketed timing never accumulates; the saturation verdict does not need
+    # the latency fit, so it is optional rather than fatal.
     good = [t for t in sorted(by) if len(by[t]) >= MIN_BUCKET]
-    model = fit_token_cost(good, [float(np.median(by[t])) for t in good])
+    model = (
+        fit_token_cost(good, [float(np.median(by[t])) for t in good])
+        if len(good) >= 2
+        else None
+    )
 
     steps = []
     for low, high in zip(RUNGS[:-1], RUNGS[1:]):
@@ -92,7 +99,11 @@ def summarise(config_path: str) -> dict:
         "steps": steps,
         "saturation_rung": saturates,
         "undetermined_rungs": undetermined,
-        "cost_model": [model.base_ms, model.slope_ms_per_token, model.residual_ms],
+        "cost_model": (
+            [model.base_ms, model.slope_ms_per_token, model.residual_ms]
+            if model is not None
+            else None
+        ),
     }
 
 
@@ -102,19 +113,26 @@ def main() -> None:
     parser.add_argument("--small", default="configs/docvqa1200_256m.yaml")
     parser.add_argument(
         "--extra",
-        default="configs/docvqa1200_2b.yaml",
-        help="a third model, ideally with a different vision encoder",
+        nargs="*",
+        default=[
+            "configs/docvqa1200_2b.yaml",
+            "configs/docvqa1200_qwen2b.yaml",
+            "configs/docvqa1200_internvl1b.yaml",
+        ],
+        help="further models; the last two are outside the SmolVLM lineage",
     )
     parser.add_argument("--out", default="results/saturation_models.json")
     args = parser.parse_args()
 
     paths = [args.large, args.small]
-    if args.extra and Path(args.extra).exists():
+    for extra in args.extra or []:
+        if not Path(extra).exists():
+            continue
         try:
-            summarise(args.extra)
-            paths.append(args.extra)
+            summarise(extra)
+            paths.append(extra)
         except (FileNotFoundError, ValueError) as error:
-            print(f"skipping {args.extra}: {error}")
+            print(f"skipping {extra}: {error}")
     runs = [summarise(path) for path in paths]
     print(f"{'model':<34}{'n':>6}" + "".join(f"{c.replace('lowres_', ''):>10}" for c in RUNGS))
     for run in runs:

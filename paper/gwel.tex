@@ -39,66 +39,38 @@ Pre-Generation Escalation Decisions in Sub-Billion VLMs}\vspace{-0.5em}}
 
 \begin{abstract}
 Vision--language cascades answer from a downsampled image and escalate to full
-resolution when the model appears uncertain. Every published escalation policy
-learns this decision by reinforcement learning on 7B-class models, and reads it
-from the model's output distribution after generation. We ask what a
-500M-parameter model already knows, before it writes a token.
+resolution when the model appears uncertain. Published escalation policies learn
+this decision by reinforcement learning on 7B-class models and read it from the
+output distribution after generation. We ask what a 500M-parameter model already
+knows before it writes a token, and the answer did not survive our own audits
+intact.
 
-Output confidence answers the wrong question. It predicts whether the cheap pass
-will be \emph{correct} (AUROC $0.758$) and barely predicts whether escalating
-would \emph{recover} a failed query ($0.617$), which is the quantity that
-actually spends budget. The distinction is invisible for text LLMs, where the
-intervention is extended reasoning over an unchanged input, and material here,
-where it adds information the model has not seen.
+A linear probe on pre-generation activations appears to predict escalation
+value better than output entropy ($0.760$ against $0.617$). Audited, most of
+that advantage is a domain effect: free image size reaches $0.748$ on the same
+mixture; inside a single dataset the probe plateaus at $0.572$ against entropy's
+$0.663$ given nine times the training data, at every depth, for four probe
+families; and where the two signals disagree, the disagreement predicts the
+source dataset at $0.738$. The headline ranking gain is nominally significant
+and does not survive correction across the fourteen paired comparisons this
+paper reports.
 
-A linear probe on pre-generation activations reads that quantity better
-($0.760$). \textbf{Then it fails an audit we ran on ourselves, and that failure
-is the paper's main result.} Escalation value is dataset-determined, DocVQA
-repairs $45\%$ of its queries and VQAv2 $5\%$, and image size tracks the same
-split, so raw image size, a feature costing no forward pass, reaches $0.748$.
-Trained and tested inside one dataset the probe reaches $0.572$ where output
-entropy, fitted on nothing, reaches $0.663$; it improves with data and never
-closes the gap, at any depth, with any of four probe families including
-non-linear ones. \textbf{The probe is largely a domain detector}: where it and
-entropy disagree, the disagreement predicts which dataset a query came from at
-AUROC $0.738$. On a benchmark mixture it routes well; on the homogeneous
-workload a deployment serves, the signal it beat is the better one.
+What survives is a decision question and a cost question. Randomising between
+fixed configurations traces a convex hull that any adaptive policy must clear.
+The standard entropy threshold never clears it on our mixture, because its read
+requires the pass it prices. A cost-derived rule (escalate where the calibrated
+expected gain exceeds the measured marginal latency over the operator's stated
+value of a correct answer) clears the hull by up to $+0.054$ when its signal is
+read mid-prefill, and, extended to a resolution ladder, by $+0.006$ to $+0.042$
+on homogeneous document traffic. On $1200$ document pages, $93\%$ of what
+escalation repairs is repaired below the top rung, and accuracy saturates at a
+pixel resolution that three models spanning $8.6\times$ parameters and two
+vision encoders agree on: a property of the corpus, measurable once.
 
-The method survives the signal. Calibrating a score to the \emph{expected signed
-gain} and thresholding at the break-even implied by measured latencies gives a
-policy with no rate to tune, cost-optimal among policies that see only the score
-(Proposition~1). Run on output entropy inside each domain, one unchanged
-operator preference yields escalation rates from $1\%$ to $61\%$ that track what
-escalation is worth there ($r = 0.974$), and dominates a fixed tuned rate.
-Calibrating the weak pass's error probability instead, which is the standard
-cascade recipe and coincides with ours exactly when escalation cannot hurt,
-spends $59\%$ more compute for the same answers.
-
-How far to escalate matters more than whether. On $1200$ document pages with
-rungs chosen by measuring the model's patch-grid buckets, $93\%$ of what
-escalation repairs is repaired below the top rung, and the top step gains
-$-0.002\ [-0.026, +0.022]$ for $156$\,ms. That ceiling holds across an
-$8.6\times$ parameter range and two distinct vision encoders, at the same pixel
-resolution but different token counts, so it is a property of the pages rather
-than of the model, and can be measured once per corpus.
-
-The same signal does not say \emph{where} to look. A localizer pooling
-visual-token states over candidate crops beats random cell choice at the finest
-grid we test, at every depth, by $0.9$ accuracy points: $6\%$ of the gap a
-perfect localizer would close. That gap is worth having, since at matched token
-budget the best crop beats the dearest resolution setting at $2.5\times$ fewer
-tokens.
-
-Every comparison here is a cost comparison, so we measure the cost model rather
-than assume it, and four standard proxies mispredict: the vision encoder is
-$43\text{--}50\%$ of the visual cost, capping post-encoder pruning at half;
-decode latency tracks depth rather than parameters; a flat per-configuration
-price understates escalation by $16\%$; and on $56\%$ of the pilot the
-``full-resolution'' configuration is not a distinct configuration at all. It was
-that third correction, not a literature review, that exposed the domain
-confound. Fifty-six claims, including the negative ones and the limits of the
-positive ones, are re-derived from the data by a harness that fails loudly when
-any stops holding, with paired comparisons corrected for family-wise error.
+Fifty-eight claims, including every negative result and the limits of the
+positive ones, are re-derived from the run records by a harness that fails
+loudly when any stops holding, with paired comparisons corrected for
+family-wise error.
 \end{abstract}
 
 \section{Introduction}
@@ -106,10 +78,13 @@ any stops holding, with paired comparisons corrected for family-wise error.
 A vision--language model asked ``what does the sign say?'' can answer from a
 thumbnail or from the full-resolution image. The thumbnail costs a fraction as
 much and is often sufficient. Deciding \emph{per query} which to use is the
-premise of adaptive visual perception, and the premise is sound: on our pilot,
-$34\%$ of queries are answered correctly at $384$\,px and would gain nothing
-from more pixels, while $41\%$ fail at both resolutions and would gain nothing
-either. Escalation changes the answer on $21\%$.
+premise of adaptive visual perception, and the raw material for it is there: on
+our pilot, $34\%$ of queries are answered correctly at $384$\,px and would gain
+nothing from more pixels, $41\%$ fail at both resolutions, and escalation
+changes the answer on $21\%$. Whether a per-query decision \emph{pays},
+against the simpler move of randomly assigning queries to fixed configurations
+at the same expected cost, is a separate question, and one this paper ends up
+answering more narrowly than it expected to.
 
 Published systems make this decision by learning it and by reading it after
 generating: VisionThink~\cite{visionthink}, AdaptVision~\cite{adaptvision} and
@@ -122,7 +97,7 @@ because it fits in a gigabyte of GPU memory~\cite{smolvlm}. Our question is
 therefore narrow: \emph{what does a 500M VLM already know about its own need
 for more pixels, and how cheaply can that be read?}
 
-Fig.~ef{fig:method} is where we end up: a single cheap pass, a score, and a
+Fig.~\ref{fig:method} is where we end up: a single cheap pass, a score, and a
 choice among resolution rungs priced by measured latency. The short answer
 changed while we were writing it. On a benchmark mixture the
 model appears to know more than its output reveals; on a single workload most of
@@ -171,70 +146,55 @@ latencies rather than a tuned rate (Algorithm~2).}
 \paragraph{Contributions.}
 \begin{enumerate}\itemsep2pt
   \item \textbf{An audit that overturns our own headline.} Pricing escalation
-  per example rather than per configuration reveals the probe escalating
-  $1.19\text{--}1.33\times$ larger images than entropy. Following that thread:
-  free image size scores $0.748$ against the probe's $0.761$, and inside a
-  single dataset the probe reaches $0.572$ where output entropy, fitted on
-  nothing, reaches $0.663$, at any depth and with any of four probe families.
-  The pre-generation advantage is a between-domain effect
+  per example reveals the probe escalating $1.19\text{--}1.33\times$ larger
+  images than entropy; following that thread, free image size scores $0.748$
+  against the probe's $0.761$, and inside a single dataset the probe reaches
+  $0.572$ where output entropy, fitted on nothing, reaches $0.663$, at any depth
+  and with any of four probe families. The probe's ranking advantage is a
+  between-domain effect, and it does not survive family-wise correction
   (\S\ref{sec:confound}, \S\ref{sec:singledomain}).
-  \item \textbf{Two questions, not one.} Confidence predicts whether the cheap
-  pass is correct; it barely predicts whether escalation would fix it. The
-  distinction is invisible for text LLMs, where the intervention is ``think
-  longer'' over the same input, and material for VLMs, where it adds
-  information the model has not seen (\S\ref{sec:two-questions}).
-  \item \textbf{A decision rule instead of a tuned rate}, and a third way to get
-  the target wrong. Calibrating the expected gain and thresholding at the
-  cost-implied break-even removes the rate parameter; calibrating the weak
-  model's error probability instead, the standard cascade recipe, over-spends
-  by $59\%$ relative for no accuracy, because it assumes escalation cannot make
-  things worse (\S\ref{sec:rule}). The rule is a property of the method, not of
-  the probe: run on output entropy inside each domain, one unchanged operator
-  preference yields escalation rates from $1\%$ to $61\%$ tracking what
-  escalation is worth there ($r=0.974$), and dominates a fixed tuned rate
+  \item \textbf{A no-signal baseline that most routing fails.} Randomising
+  between fixed configurations reaches every point on their convex hull with no
+  signal at all, and this is the comparison the escalation literature does not
+  make. The standard entropy threshold never clears that hull on our mixture,
+  because its read requires the pass it prices; the probe clears it by
+  $+0.008$ to $+0.054$, an advantage owed to its mid-prefill abort rather than
+  to its ranking; and the resolution ladder clears it on homogeneous traffic
+  where binary escalation does not (\S\ref{sec:policy}, \S\ref{sec:ladder}).
+  \item \textbf{A cost-derived decision rule, and the cascade assumption it
+  corrects.} Calibrating the expected signed gain and thresholding at the
+  cost-implied break-even removes the rate parameter. Calibrating the weak
+  model's error probability instead, the standard cascade recipe, coincides with
+  our rule exactly when escalation cannot make things worse, and spends $59\%$
+  relatively more compute here because it can (\S\ref{sec:rule}). The rule is a
+  property of the method, not of any signal: run on output entropy inside each
+  domain, one unchanged operator preference yields escalation rates from $1\%$
+  to $61\%$ tracking what escalation is worth there ($r = 0.974$)
   (\S\ref{sec:transfer}).
-  \item \textbf{How far to escalate is the decision the field collapses.} Of
-  the queries escalation repairs, $77\%$ are repaired by an intermediate rung,
-  and that rung is twice as efficient per millisecond as the one above it. The
-  rule generalises to a ladder without modification and saves $35$\,ms at no
-  accuracy cost on the one dataset where a top rung exists, which is also how
-  we discovered that for $56\%$ of the pilot the ``full-resolution''
-  configuration is not a distinct configuration at all (\S\ref{sec:ladder}).
-  \item \textbf{A pre-generation probe, and the target it must be trained on.}
-  AUROC $0.760$ against $0.617$, saturating at layer 6 of 32 on the mixture,
-  though \S\ref{sec:singledomain} shows that depth does not transfer. Trained on the
-  conditional target it beats entropy on ranking and loses to it as a policy by
-  $8.5$ points; trained on the joint target it holds $90\%$ of the Pareto front
-  and is cheaper at matched accuracy in every one of $200$ resplits
-  (\S\ref{sec:probe}, \S\ref{sec:policy}).
-  \item \textbf{Two ways a better signal fails a policy}, both measured: a
-  target the policy does not face, and a signal the policy cannot afford. An
-  entropy--probe ensemble ranks best of all and is dominated as a policy,
-  because reading it requires the pass it was meant to shorten
-  (\S\ref{sec:policy}).
-  \item \textbf{A near-negative on localization, stated as a magnitude.}
-  Pooling visual-token states per candidate crop beats random cell choice at the
-  finest grid we test, at every depth, by $0.9$ accuracy points: $6\%$ of the gap
-  a perfect localizer would close (\S\ref{sec:localizer}).
+  \item \textbf{How far to escalate, and where it stops paying.} Of the queries
+  escalation repairs, $77\%$ are repaired by an intermediate rung, and that rung
+  is twice as efficient per millisecond as the one above it. On a
+  single-domain pilot with rungs verified distinct per example, accuracy
+  saturates at a pixel resolution that three models spanning $8.6\times$
+  parameters and two vision encoders agree on, so the ceiling is a property of
+  the corpus and can be measured once (\S\ref{sec:ladder},
+  \S\ref{sec:singledomain}).
   \item \textbf{A measured cost model.} Every comparison here is a cost
-  comparison, so we measure rather than assume: the vision encoder is
-  $43\text{--}50\%$ of the visual cost across an $8.6\times$ parameter range,
-  which caps post-encoder pruning at half, and decode latency follows depth
-  rather than parameter count (\S\ref{sec:cost}).
+  comparison, so we measure rather than assume, and four standard proxies
+  mispredict: the vision encoder is $43\text{--}50\%$ of the visual cost, which
+  caps post-encoder pruning at half; decode latency follows depth rather than
+  parameter count; a flat per-configuration price understates escalation by
+  $16\%$; and for $56\%$ of the mixture the ``full-resolution'' configuration is
+  not a distinct configuration at all (\S\ref{sec:cost}, \S\ref{sec:ladder}).
+\end{enumerate}
 
-  \item \textbf{The untrained escalation mechanism is weak.} Asking the model
-  whether it needs more resolution, the mechanism published systems train, escalates as often as uncertainty-based routing and selects the wrong
-  queries, losing to the probe by $0.070\ [0.020, 0.120]$ accuracy at
-  $25.8$\,ms higher cost (\S\ref{sec:policy}).
-  \item \textbf{An ablation read at fixed budget, not fixed preference.} Held at
-  a fixed operator preference, every ablation appears to improve accuracy,
-  because every removal escalates more. Read at a fixed latency budget, the
-  ladder is worth $37$ accuracy points and per-example pricing $0.003$
-  (\S\ref{sec:ablation}).
-  \item \textbf{Abstention priced on both axes.} Declining a query is the
-  weaker lever for holding risk down, escalation reaches coverage abstention cannot, and is nearly worthless as a budget action, because a gain-calibrated
-  rule already escalates unanswerable queries below their base rate, leaving a
-  perfect gate only $4.2\%$ of latency to recover (\S\ref{sec:abstain}).\end{enumerate}
+Beyond these, the paper reports several bounded results in their sections: the
+untrained self-report mechanism loses to uncertainty routing
+(\S\ref{sec:policy}); a localizer on pooled visual-token states beats random
+cell choice by $0.9$ points, $6\%$ of the gap a perfect one would close
+(\S\ref{sec:localizer}); an ablation read at fixed budget rather than fixed
+preference (\S\ref{sec:ablation}); and abstention priced on both of its axes
+(\S\ref{sec:abstain}).
 
 \section{Related work}
 
@@ -355,6 +315,48 @@ at two sizes (\answerlow), a resolution-capped full pass, one preview$+$crop per
 cell of a $2\times2$ grid (\crop), and preview$+$OCR transcript variants
 (\ocr). The full pilot is $1000$ examples across VQAv2, TextVQA, DocVQA and
 V*Bench, giving $13\,000$ instrumented generations.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\linewidth, height=4.8cm, ybar=1.5pt, bar width=6.5pt,
+  symbolic x coords={VQAv2,TextVQA,DocVQA,V*Bench},
+  xtick=data, ymin=0, ymax=0.80, ylabel={accuracy},
+  ymajorgrids, grid style={gwelgrid},
+  legend style={at={(0.5,1.03)},anchor=south,legend columns=3,draw=none,
+    fill=none,font=\footnotesize,/tikz/every even column/.append style={column sep=6pt}},
+  tick label style={font=\footnotesize}, label style={font=\footnotesize},
+]
+\addplot[fill=gwelgrid,draw=black!60] coordinates
+  {(VQAv2,0.307)(TextVQA,0.044)(DocVQA,0.103)(V*Bench,0.247)};
+\addplot[fill=gwelblue!70,draw=gwelblue] coordinates
+  {(VQAv2,0.607)(TextVQA,0.324)(DocVQA,0.280)(V*Bench,0.240)};
+\addplot[fill=gwelorange!80,draw=gwelorange] coordinates
+  {(VQAv2,0.623)(TextVQA,0.412)(DocVQA,0.687)(V*Bench,0.353)};
+\legend{no image, $384$\,px ($64$ tok), full resolution}
+\end{axis}
+\end{tikzpicture}
+\caption{Accuracy per dataset at three information levels, $1000$-example
+pilot. The gap between the blue and orange bars is everything escalation can
+ever buy, and it ranges from $1.6$ points on VQAv2 to $40.7$ on DocVQA. On
+V*Bench the thumbnail matches the blind baseline: at $384$\,px its small
+objects are simply gone.}
+\label{fig:domainbars}
+\end{figure}
+
+\paragraph{Where resolution matters is a property of the benchmark.}
+Figure~\ref{fig:domainbars} is the observation the rest of the paper has to be
+read against. Cutting the input to $64$ visual tokens costs VQAv2 $1.6$
+accuracy points ($0.623$ to $0.607$), and $31\%$ of it is answered correctly
+with no image at all; DocVQA loses $40.7$ points to the same cut, and
+correctness flips between the two passes on $50\%$ of its queries against
+$8\%$ for VQAv2. This is the sub-billion transposition of what
+\cite{visionthink} report at $7$B, where a $4\times$ token reduction is nearly
+free outside OCR-heavy benchmarks. The consequence for routing is immediate:
+in any mixed corpus the escalation signal is entangled with dataset identity
+from the start, and \S\ref{sec:confound} measures how much of the probe's
+apparent skill is exactly that.
 
 Correctness uses the metric each benchmark defines (VQA accuracy for VQAv2 and TextVQA, ANLS for DocVQA, exact match for V*Bench multiple choice) and is
 recomputed offline from stored answers, so changing the metric never requires
@@ -632,7 +634,10 @@ would reach for first. Fitting is a single
 pass over cached activations, and the resulting score is the one consumed by the
 decision node of Fig.~\ref{fig:pipeline}.
 
-\paragraph{Depth.} Fig.~\ref{fig:layers} sweeps $\ell$. The signal is absent at
+\paragraph{Depth.} Fig.~\ref{fig:layers} sweeps $\ell$. The depth used
+everywhere in this paper is selected on the validation fold, which independently
+picks layer 6 (validation AUROC $0.774$ on the conditional target, $0.790$ on
+the joint one); the test curve below is illustration, not selection. The signal is absent at
 $\ell=0$ by construction, the last prompt token is textual and has attended to nothing, and reaches its ceiling by $\ell=3$. Bootstrapped, layer 6 gives
 $0.760\ [0.668, 0.849]$ and layer 23 gives $0.760\ [0.652, 0.853]$:
 indistinguishable.
@@ -803,10 +808,16 @@ escalating.
 \addlegendentry{probe}
 \addplot[only marks,mark=triangle*,mark size=2.6pt,black] coordinates {(123.4,0.385)(206.0,0.530)};
 \addlegendentry{fixed}
+\addplot[thick,gray,dashed,no marks] coordinates {(123.4,0.385)(206.0,0.530)};
+\addlegendentry{randomised fixed}
 \end{axis}
 \end{tikzpicture}
 \caption{Accuracy against latency as the escalation rate sweeps from $10\%$ to
-$70\%$, on the reported fold. Four probe points lie on the Pareto front,
+$70\%$, on the reported fold. The dashed chord is what randomising between the
+two fixed policies reaches with no signal. On this fold two entropy points sit
+marginally above it; resampled, the best entropy operating point is
+indistinguishable from the chord and every other sits below it
+(Table~\ref{tab:convexity}). Four probe points lie on the Pareto front,
 together with the two fixed policies at its ends. Fig.~\ref{fig:resplit} tests
 how much of this survives resplitting.}
 \label{fig:frontier}
@@ -850,6 +861,55 @@ it.}
 The honest summary is that the direction of the effect is robust and its
 universality is not. We report the distribution rather than the fold because the
 fold is what a single split of $1000$ examples can support.
+
+\paragraph{The baseline that needs no signal.} Both comparisons above are
+between adaptive policies, and that is not the bar a deployment sets. Any point
+on the segment between two fixed policies is reachable by randomisation: serve a
+fraction of queries at the dear configuration and the rest at the cheap one. The
+convex hull of the fixed policies is therefore the floor an adaptive policy must
+clear, and no comparison against a single endpoint establishes it.
+Table~\ref{tab:convexity} reports each policy's accuracy minus the hull
+accuracy at its own expected latency, paired over $30$ resampled folds.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\toprule
+gap to the hull & $V{=}400$ & $800$ & $1600$ & $3200$ \\
+\midrule
+probe, mixture & $\mathbf{+0.054}$ & $+0.051$ & $+0.033$ & $+0.008$ \\
+entropy, mixture & $-0.001$ & $-0.016$ & $\mathbf{-0.032}$ & $-0.026$ \\
+ladder, DocVQA & $+0.042$ & $+0.029$ & $+0.017$ & $+0.006$ \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy above what randomising between fixed configurations reaches
+at the same expected latency, $30$ resampled folds; every probe and ladder
+interval excludes zero and every entropy interval excludes any gain above
+$+0.005$.}
+\label{tab:convexity}
+\end{table}
+
+The comparison is not an invention of ours: random allocation is a standard
+baseline in text routing, where \cite{lugoloobi} plot their cascades against
+it, and it is absent from the visual escalation evaluations we survey. Nor does
+the verdict depend on how the operating point is chosen. Sweeping quantile
+rates instead of preferences, entropy's best point is indistinguishable from
+the chord ($+0.002\ [-0.002, +0.005]$ at a $10\%$ rate) and every other rate
+sits significantly below it, while the probe clears the chord at all seven
+rates ($+0.006$ to $+0.056$).
+
+Three readings, each load-bearing. The entropy threshold, the baseline this
+literature measures against, does not clear the hull here at any operating
+point of either parameterisation: reading it requires completing the pass it
+prices, and the read cost eats the routing gain. The
+probe clears the hull everywhere, by most at tight budgets, and
+\S\ref{sec:confound} shows its ranking is largely a domain effect, so the
+margin is owed to the mid-prefill abort rather than to what the direction
+knows. And on the homogeneous pilot the ladder clears the hull where binary
+escalation does not (\S\ref{sec:ladder}): the graded action space, not the
+signal, beats the coin flip there. Adaptive escalation pays where its read is
+cheap or its actions are graded, and not otherwise.
 
 \paragraph{A better ranking, again, and again no better policy.} Since our own
 numbers say the ceiling is the signal, we tried to improve the signal. Entropy
@@ -1229,7 +1289,10 @@ better default because monotonicity is free information that binning discards,
 but nothing here rests on it.
 
 \paragraph{When the rule is optimal, and how it relates to UCCI's theorem.}
-Eq.~\ref{eq:breakeven} is not a heuristic. Let $s(x)$ be any routing score and
+Proposition~1 below is a direct transposition of the optimality argument
+of~\cite{ucci} to a different calibration target; we state it to fix notation
+and to make visible exactly which assumption separates the two rules, not as a
+contribution in itself. Let $s(x)$ be any routing score and
 let $\Pi_s$ be the policies measurable with respect to it, which is what a
 deployed router is: it sees the score, not the outcome.
 
@@ -1551,6 +1614,32 @@ round pixel sizes. Every rung is strictly dearer than the one below it on
 $95\text{--}100\%$ of images, and latency is affine in tokens at
 $205.0 + 0.415\,v$\,ms with a worst residual of $20.2$\,ms.
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.97\textwidth]{figures/qualitative.png}
+\caption{Three DocVQA pages rendered at the resolution each rung actually
+receives (Lanczos resize to the rung's longest edge, shown nearest-neighbour;
+the model's answer and its visual-token price are inset). Left: layout-scale
+evidence survives the thumbnail and $64$ tokens already answer; this covers
+$27.9\%$ of the $1200$ pages. Centre: the axis label is an unreadable smudge
+at $384$\,px and the model confabulates ``Time''; at $1152$\,px it reads. A
+higher rung repairs a wrong answer this way on $49.9\%$ of pages. Right: the
+table resolves at $1152$\,px yet the model reports the value of the wrong row,
+and full resolution repeats the error; $13.0\%$ of pages fail at every rung,
+and for them the binding constraint is not legibility, so no resolution policy
+can help.}
+\label{fig:qualitative}
+\end{figure*}
+
+\paragraph{What the taxonomy looks like on paper.}
+Figure~\ref{fig:qualitative} grounds the shares the ladder trades on, one real
+page per outcome. The thumbnail suffices on $27.9\%$ of the $1200$ pages, a
+higher rung flips a wrong answer to a right one on $49.9\%$, and $13.0\%$ fail
+everywhere, full resolution included: the third panel fails by reading the
+wrong table row, an error more pixels cannot repair. The remaining $9.2\%$ are
+non-monotone in the rung order, correct at $768$\,px or at full resolution
+while $1152$\,px fails.
+
 The result is a saturation point, and it arrives early
 (Table~\ref{tab:saturation}).
 
@@ -1837,7 +1926,7 @@ would have to recover, and \S\ref{sec:localizer} recovers $6\%$ of it.}
 \label{fig:twoways}
 \end{figure}
 
-The two readings of the crop row are the whole point (Fig.~ef{fig:twoways}). A \emph{randomly} chosen
+The two readings of the crop row carry the comparison (Fig.~\ref{fig:twoways}). A \emph{randomly} chosen
 cell reaches $0.392$, which is what the same tokens buy in resolution
 ($0.383$ at $64$, and about $0.42$ interpolated at $128$). The \emph{best} cell
 reaches $0.584$, beating the dearest resolution configuration while spending
@@ -1885,19 +1974,22 @@ so part of what transfers may be encoder-side rather than genuinely
 cross-model; separating those requires a source model with a different encoder.
 
 We ask many questions of one dataset mixture, so the intervals above are
-corrected rather than nominal. Thirteen paired comparisons at the nominal $5\%$
-level carry a $49\%$ chance of at least one false positive, so we convert each
+corrected rather than nominal. Fourteen paired comparisons at the nominal $5\%$
+level carry a $51\%$ chance of at least one false positive, so we convert each
 bootstrap to a two-sided p-value and run Holm's step-down over the family.
-Nothing is lost: the nine comparisons that clear the nominal level are the same
-nine that survive correction, at adjusted $p = 0.0013$, because the surviving
-effects sit at the bootstrap's resolution floor while the failures are
-unambiguous nulls.
+Exactly one claim is lost: the probe's AUROC advantage on the recovery target,
+the most visible number of an earlier draft's abstract, is nominally significant
+($p = 0.041$) and adjusts to $p = 0.207$ under the step-down. The nine cost
+comparisons all survive at adjusted $p = 0.0014$, sitting at the bootstrap's
+resolution floor, while the accuracy comparisons are unambiguous nulls. We keep
+the lost claim in the paper as an observation and no longer state it as
+established.
 
 The split is itself informative. \textbf{Every surviving comparison is about
 cost}; all three probe-versus-entropy \emph{accuracy} comparisons fail, as does
-the top rung's gain. That is the paper's claim structure certified rather than
-asserted: what we demonstrate is cheaper compute at accuracy the data cannot
-separate, not better answers.
+the top rung's gain. The split matches the paper's claim structure: what we
+demonstrate is cheaper compute at accuracy the data cannot separate, not better
+answers.
 
 The Pareto-dominance result is the one we have tested hardest and it came back
 qualified: universal dominance holds on the reported fold and in $52\%$ of
@@ -1925,7 +2017,7 @@ uncertain.
 
 Every numeric claim in this paper is re-derived from the run records by a
 validation harness with an explicit threshold per claim, which exits non-zero if
-any stops holding; it currently checks fifty-six, including the negative
+any stops holding; it currently checks fifty-eight, including the negative
 results on localization, on our own energy instrument, and on the universality
 of Pareto dominance, that last one asserts the claim is \emph{not} universal,
 so restating it too strongly fails the build. Claims stated in the text and
@@ -1933,7 +2025,14 @@ not covered by a check are marked as unverified. The oracle runs are stored as
 append-only JSONL with per-configuration answers, generation scores and hardware
 measurements, so correctness metrics and cost weights can be changed offline
 without re-running any model. Splits are hash-based on example identifiers, so
-growing the pilot never reshuffles examples already assigned.
+growing the pilot never reshuffles examples already assigned. Decoding is greedy
+throughout (16 new tokens, no sampling), so every accuracy in this paper is
+deterministic given the checkpoint and the image. The single-domain pilots time
+each pass once; the cost model is fitted on per-bucket medians over at least
+$50$ passes, so no individual timing can set the line. The discovery that
+$56\%$ of the mixture's full-resolution passes were not distinct configurations
+(\S\ref{sec:ladder}) is a protocol defect of ours that the verified ladder of
+the single-domain pilot was designed to remove.
 
 \paragraph{Compute.} Every experiment in this paper runs on one RTX 4060 laptop
 GPU with $8.6$\,GB of memory. The oracle runs comprise $54\,660$
@@ -1969,11 +2068,19 @@ is a way of deciding for a heterogeneous mixture and not for a workload.
 
 What we would keep is the part that did not depend on the probe. The decision
 rule is signal-agnostic and survives on output confidence, where one stated
-preference produces a different escalation rate per domain without retuning. And
-the resolution ladder turns out to carry most of the money that was attributed
-to the escalate/answer decision: on document pages, $93\%$ of what escalation
-repairs is repaired below the top rung, and the ceiling sits at a pixel
-resolution that three models with two vision encoders agree on.
+preference produces a different escalation rate per domain without retuning. The
+resolution ladder carries most of the money that was attributed to the
+escalate/answer decision: on document pages, $93\%$ of what escalation repairs
+is repaired below the top rung, and the ceiling sits at a pixel resolution that
+three models with two vision encoders agree on.
+
+The comparison that decides whether any of this matters is against randomising
+between fixed configurations, which needs no signal. The standard entropy
+threshold never clears that bar on our mixture; the probe clears it only because
+it is read mid-prefill; the ladder clears it on homogeneous traffic. Where a
+single fixed rung fits the budget, pinning it at the corpus's measured
+saturation point is the right policy, and per-query routing is for the traffic
+no single rung fits.
 
 The result we would most like others to carry away is the negative one in
 \S\ref{sec:policy}, which we encountered four times. A probe trained on the

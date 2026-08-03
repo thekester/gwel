@@ -1,0 +1,93 @@
+# The saturation ceiling, in a sub-billion model outside every lineage so far.
+#
+# InternVL3-1B is 0.94B parameters: an InternViT-300M encoder with dynamic
+# tiling (448 px tiles, up to 12) and a Qwen2.5-0.5B language model. Nothing is
+# shared with SmolVLM (SigLIP encoder, pixel-shuffle, SmolLM2) and the encoder
+# family differs from Qwen2-VL's NaViT-style patching too. Same 1200 pages,
+# same manifest, same pixel rungs.
+#
+# Together with Qwen2-VL-2B this closes the two open axes of the saturation
+# claim at once: out-of-lineage at the paper's own sub-billion scale, and a
+# third distinct resolution mechanism (fixed grid buckets / proportional
+# patching / tiling). If this model also stops gaining at 1152 px, the ceiling
+# is a property of the corpus's print size; if it keeps gaining, the claim
+# narrows to the families it was measured on.
+#
+# crop_to_patches is the load-bearing line: the HF default resizes every input
+# to a single 448 px tile, which would collapse all four rungs into one
+# configuration. That is the exact failure mode documented in the paper
+# (configurations must differ on the data, not in the config file), so the
+# engine refuses unknown override names and the run must be smoke-tested for
+# distinct visual-token counts per rung before collection.
+
+model:
+  model_id: OpenGVLab/InternVL3-1B-hf
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+  image_processor_overrides:
+    crop_to_patches: true
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/docvqa1200
+  pilot_manifest: data/processed/docvqa1200/manifest.jsonl
+  records: results/runs/docvqa1200_internvl1b_records.jsonl
+  labels: results/runs/docvqa1200_internvl1b_labels.jsonl
+  router_dir: results/router-docvqa1200-internvl1b
+
+runner:
+  lowres_sizes: [384, 768, 1152]
+  full_longest_side: 2048
+  # This study reads the resolution ladder only.
+  include_crop: false
+  include_ocr: false
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: false
+    region_longest_side: 768
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005
+  lambda_energy_per_mj: 0.000002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 120
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 5000
+  image_dir: data/processed/docvqa1200/images
+  per_dataset:
+    docvqa: 1200

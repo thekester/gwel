@@ -56,9 +56,12 @@ python scripts/justify_calibrator.py      # is isotonic the right calibrator her
 python scripts/sensitivity_cost_weights.py  # what do the cost weights actually change?
 python scripts/localizer_interval.py      # does the localizer beat random, and by how much?
 python scripts/tokens_two_ways.py         # resolution or position: which buys more per token?
+python scripts/baseline_convexity.py      # does any policy beat randomised fixed configs?
 python scripts/recost_policies.py         # per-example cost model vs the flat one
 python scripts/analyze_cache_sensitivity.py  # can KV reuse refund the probe?
 python scripts/resplit_dominance.py       # does Pareto dominance survive resplitting?
+python scripts/make_domain_bars.py        # what resolution buys, per dataset
+python scripts/make_qualitative_figure.py # the escalation taxonomy on real pages
 python scripts/make_figure_data.py        # pgfplots coordinates for the paper figures
 python scripts/probe_cross_model.py       # can a smaller model decide for a larger one
 python scripts/profile_components.py      # encoder / projector / prefill / decode split

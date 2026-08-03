@@ -18,6 +18,11 @@ class ModelConfig:
     dtype: str = "bfloat16"
     max_new_tokens: int = 32
     answer_prompt: str = "Answer with a single word or short phrase."
+    # Attributes set on the processor's image processor after loading, e.g.
+    # {crop_to_patches: true} for InternVL, whose HF default resizes every
+    # input to one 448 px tile and would collapse the resolution rungs into
+    # a single configuration. Keys must name existing attributes.
+    image_processor_overrides: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

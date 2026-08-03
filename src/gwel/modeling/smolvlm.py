@@ -127,6 +127,13 @@ class SmolVlmEngine:
         dtype = getattr(torch, self.config.dtype)
         device = self._resolve_device()
         self._processor = AutoProcessor.from_pretrained(self.config.model_id)
+        for name, value in self.config.image_processor_overrides.items():
+            if not hasattr(self._processor.image_processor, name):
+                raise AttributeError(
+                    f"{type(self._processor.image_processor).__name__} has no "
+                    f"attribute {name!r}; check image_processor_overrides"
+                )
+            setattr(self._processor.image_processor, name, value)
 
         # AutoModelForVision2Seq is deprecated and does not recognise newer
         # configs such as SmolVLM2's; prefer the current class where available.

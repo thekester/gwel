@@ -230,6 +230,72 @@ favours them.
 
 ---
 
+## 0-hull. Most routing fails the baseline that needs no signal, tested
+
+**The comparator a hostile review demanded, and the paper lacked.** Any point on
+the segment between two fixed policies is reachable by randomisation: serve a
+fraction p of queries at the dear configuration, the rest at the cheap one. The
+convex hull of the fixed policies is the floor an adaptive policy must clear.
+The paper compared adaptive policies to each other and to single endpoints, and
+never to the hull (`scripts/baseline_convexity.py`, check CV1).
+
+Gap to the hull at the policy's own expected latency, 30 resampled folds:
+
+| policy | V=400 | 800 | 1600 | 3200 |
+| --- | --- | --- | --- | --- |
+| probe, mixture | **+0.054** | +0.051 | +0.033 | +0.008 |
+| entropy, mixture | −0.001 | −0.016 | **−0.032** | −0.026 |
+| ladder, DocVQA | +0.042 | +0.029 | +0.017 | +0.006 |
+
+**Three load-bearing readings.**
+
+1. **The entropy threshold, the field's standard baseline, never clears the
+   hull.** Reading it requires completing the pass it prices, and the read cost
+   eats the routing gain. A coin flip between fixed settings does as well or
+   better at every operating point.
+2. The probe clears the hull everywhere, by most at tight budgets. Given
+   §0-audit, its margin is owed to the **mid-prefill abort**, not to what the
+   direction knows.
+3. The ladder clears the hull on the homogeneous pilot, where binary escalation
+   sits under it. The graded action space, not the signal, beats the coin flip.
+
+**The corrected thesis**: adaptive escalation pays where its read is cheap or
+its actions are graded, and not otherwise. Where one fixed rung fits the budget,
+pin it at the corpus's measured saturation point (§0-corpus) and skip routing.
+
+**Second pass: the verdict does not depend on the parameterisation.** The
+frontier figure (rate-swept, one fold) showed two entropy points visually above
+the chord, contradicting the V-swept table. Resampled 30 times under the
+rate-swept parameterisation: entropy's best point is +0.002 [-0.002, +0.005],
+indistinguishable from the chord; every other rate is significantly below; the
+probe clears at all seven rates (+0.006 to +0.056). The one-fold impression was
+noise. Both parameterisations now live in the artefact and CV1 asserts both.
+Attribution added: random allocation is a standard baseline in text routing
+(Lugoloobi et al. plot against it); the visual escalation literature omits it.
+
+---
+
+## 0-headline. The abstract's most visible number does not survive Holm, corrected
+
+**The one claim the correction was never applied to, now included.** The
+probe-vs-entropy AUROC gain on the recovery target (+0.143 [+0.031, +0.264])
+lived in the abstract while the Holm family covered only policy-level
+comparisons. Added (bootstrap p over resampled examples, AUROC recomputed per
+draw): nominal p=0.041, **adjusted p=0.207, lost**.
+
+Consistent with §0-audit: a ranking advantage that is largely a domain effect
+should be fragile, and it is. The paper now states the point estimates as an
+observation and no longer as an established improvement. Check X1 asserts that
+exactly this one claim is lost, so it can neither be quietly restored nor
+silently joined by others.
+
+**Also verified while auditing**: the probe depth was NOT selected on the test
+fold. The validation fold independently picks layer 6 (val 0.774 conditional /
+0.790 joint; test 0.750 / 0.761). Check P9. Decoding is greedy throughout
+(`do_sample=False`), so accuracies are deterministic given the checkpoint.
+
+---
+
 ## 0-twoways. What the localizer would have been worth, priced
 
 **The comparison the paper asserted against the pruning literature, measured.**
@@ -433,6 +499,32 @@ is genuinely lost and pixels do not help.
 Read as a routing signal, the probe escalates a correct answer on a large page
 and declines a hopeless one on a small photograph, and neither decision used
 anything about the query. Check E3.
+
+---
+
+## 0-figures. The observation figures the paper argued without showing, added
+
+**Two figures the reviewed drafts only asserted in prose.**
+
+First, per-domain accuracy at three information levels on the 1000-example
+mixture (`scripts/make_domain_bars.py`, `results/domain_bars.json`, check Q2,
+fig:domainbars). Dropping to 64 visual tokens costs VQAv2 1.6 accuracy points
+(0.623 to 0.607) while 31% of it is answered with no image at all; DocVQA
+loses 40.7 points to the same cut; on V*Bench the thumbnail ties the blind
+baseline (0.240 vs 0.247). This is the sub-billion transposition of
+VisionThink's headline observation, and it is the picture behind the domain
+confound: what escalation can buy is decided by the benchmark before any
+signal is read.
+
+Second, the escalation taxonomy on real pages
+(`scripts/make_qualitative_figure.py`, `results/qualitative_cases.json`,
+check Q1, fig:qualitative). Three DocVQA pages rendered at the resolution each
+rung actually receives: the thumbnail suffices (27.9% of the 1200 pages), the
+axis label that is a smudge at 384 px and reads at 1152 px (a higher rung
+repairs 49.9%), and the table where the model reports the wrong row at every
+resolution including full (13.0% fail everywhere). The remaining 9.2% are
+non-monotone across rungs. Q1 pins the three pages to their recorded answers,
+so the figure cannot drift from the data it illustrates.
 
 ---
 

@@ -20,7 +20,7 @@ intervals. Forty examples is small: read the direction, not the third digit.
 
 > **Every claim below is checked by `scripts/validate_claims.py`**, which
 > re-derives it from the data with an explicit threshold and fails loudly if it
-> stops holding. Current state: 56 checks, 56 passing. Claims that are stated
+> stops holding. Current state: 60 checks, 60 passing. Claims that are stated
 > here but *not* covered by a check should be treated as unverified.
 
 > **A Pareto-dominance claim made elsewhere in this repository was
@@ -37,6 +37,13 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > dataset the probe falls to chance (0.519 weighted) while entropy holds 0.664.
 > No layer rescues it. See `ANGLES.md` §0-audit, checks E1-E2. Section 1 below
 > reports pooled AUROCs and should be read as a property of the mixture.
+
+> **What escalation can buy is fixed by the benchmark before any signal is
+> read.** At 64 visual tokens VQAv2 gives back 1.6 accuracy points and answers
+> 31% blind; DocVQA gives back 40.7 points; V*Bench's thumbnail ties its blind
+> baseline. On the 1200 DocVQA pages the thumbnail suffices for 27.9%, a higher
+> rung repairs 49.9%, and 13.0% fail at every rung including full resolution.
+> See `ANGLES.md` §0-figures, checks Q1-Q2.
 
 > **A flat per-configuration latency under-charges escalation by 16%.** The
 > profiling image did not actually escalate. Per-example costing shrinks the
@@ -75,6 +82,19 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > has a different vision encoder and spends 810 visual tokens where the others
 > spend 640, yet stops gaining at the same pixel target. What runs out is the
 > information in the pixels. See `ANGLES.md` §0-encoder, check R9.
+
+> **The headline AUROC claim does not survive family-wise correction.** Added to
+> the Holm family, the probe-vs-entropy ranking gain on the recovery target is
+> nominally significant (p=0.041) and adjusts to p=0.207. It is now stated as an
+> observation, not as established. All nine cost claims survive at adjusted
+> p=0.0014. See `ANGLES.md` §0-headline, check X1.
+
+> **Most routing fails the baseline that needs no signal.** Randomising between
+> fixed configurations traces a convex hull; the entropy threshold never clears
+> it on the mixture (gaps -0.001 to -0.032) because its read requires the pass
+> it prices. The probe clears it (+0.008 to +0.054) owing to the mid-prefill
+> abort, and the ladder clears it on homogeneous traffic (+0.006 to +0.042)
+> where binary escalation does not. See `ANGLES.md` §0-hull, check CV1.
 
 > **For 56% of the pilot the "full resolution" configuration is not a distinct
 > configuration.** The processor caps its target at the input's longest side, so
