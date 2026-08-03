@@ -64,10 +64,14 @@ value of a correct answer) clears the hull by up to $+0.054$ when its signal is
 read mid-prefill, and, extended to a resolution ladder, by $+0.006$ to $+0.042$
 on homogeneous document traffic. On $1200$ document pages, $93\%$ of what
 escalation repairs is repaired below the top rung, and accuracy saturates at a
-pixel resolution that three models spanning $8.6\times$ parameters and two
-vision encoders agree on: a property of the corpus, measurable once.
+pixel resolution that four models agree on, spanning $8.6\times$ parameters,
+two lineages and three ways of turning pixels into tokens: a property of the
+corpus, measurable once. A fifth model, whose token budget does not grow with
+resolution, stops a rung earlier: the corpus ceiling is an upper bound on what
+a model needs rather than a constant, and it bounds how much of that ceiling is
+the pixels and how much the sequence length.
 
-Fifty-eight claims, including every negative result and the limits of the
+Sixty-three claims, including every negative result and the limits of the
 positive ones, are re-derived from the run records by a harness that fails
 loudly when any stops holding, with paired comparisons corrected for
 family-wise error.
@@ -175,10 +179,13 @@ latencies rather than a tuned rate (Algorithm~2).}
   escalation repairs, $77\%$ are repaired by an intermediate rung, and that rung
   is twice as efficient per millisecond as the one above it. On a
   single-domain pilot with rungs verified distinct per example, accuracy
-  saturates at a pixel resolution that three models spanning $8.6\times$
-  parameters and two vision encoders agree on, so the ceiling is a property of
-  the corpus and can be measured once (\S\ref{sec:ladder},
-  \S\ref{sec:singledomain}).
+  saturates at a pixel resolution that four models agree on, spanning
+  $8.6\times$ parameters, two lineages and three ways of turning pixels into
+  tokens, so the ceiling is a property of the corpus and can be measured once,
+  by a procedure we state and price. A fifth model, whose token budget stays
+  flat as resolution rises, saturates a rung earlier, which makes the corpus
+  ceiling an upper bound rather than a constant and bounds the mechanism claim
+  we can make (\S\ref{sec:ladder}, \S\ref{sec:singledomain}).
   \item \textbf{A measured cost model.} Every comparison here is a cost
   comparison, so we measure rather than assume, and four standard proxies
   mispredict: the vision encoder is $43\text{--}50\%$ of the visual cost, which
@@ -495,6 +502,7 @@ pass failed. $Q_3$ separates queries no visual operation can rescue.
 
 \begin{figure}[t]
 \centering
+\resizebox{\columnwidth}{!}{%
 \begin{tikzpicture}[
   box/.style={draw=gwelgrid,rounded corners=2pt,minimum height=6mm,font=\scriptsize,align=center},
   >={Stealth[length=2mm]}, node distance=3mm]
@@ -514,7 +522,7 @@ pass failed. $Q_3$ separates queries no visual operation can rescue.
   {$123.4$\,ms \quad AUROC $0.617$};
 \node[font=\scriptsize,above=0.5mm of probe,text width=3.2cm,align=center]
   {$20.3$\,ms \quad AUROC $0.760$};
-\end{tikzpicture}
+\end{tikzpicture}}
 \caption{Two allocation signals read from the same low-resolution pass. Output
 entropy requires the pass to complete and generate; the probe reads the
 residual stream at layer 6 of 32 and needs no decode.}
@@ -529,6 +537,7 @@ overall and $n=617$ for $Q_2$.
 
 \begin{table}[t]
 \centering\small
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{lcc}
 \toprule
 target & output entropy & pre-generation probe \\
@@ -537,7 +546,7 @@ $Q_1$ correct        & $0.758$ & $0.822$ \\
 $Q_2$ escalation helps & $0.617$ & $\mathbf{0.760}$ \\
 $Q_3$ answerable     & $0.539$ & $0.681$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \caption{AUROC by target. Entropy is scored with the sign that favours it;
 read with the $Q_1$ sign it scores $0.372$ on $Q_2$, because the sign flips
 between the two questions.}
@@ -714,6 +723,7 @@ Retraining the same probe on $G$ fixes it (Table~\ref{tab:policy}).
 
 \begin{table}[t]
 \centering\small
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{lccc}
 \toprule
 policy (escalating $30\%$) & accuracy & latency & AUROC on $G$ \\
@@ -725,7 +735,7 @@ probe on $Q_2$      & $0.395$ & $151.7$ & $0.259$ \\
 always full         & $0.530$ & $206.0$ & n/a \\
 oracle              & $0.580$ & $139.6$ & n/a \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \caption{End-to-end policy comparison on the held-out fold, latency in
 milliseconds. Against the entropy threshold, the joint-target probe differs in
 accuracy by $+0.030\ [-0.005, 0.070]$, indistinguishable, and in latency by
@@ -746,6 +756,8 @@ one-word judgement (Table~\ref{tab:baseline}).
 
 \begin{table}[t]
 \centering\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{lccc}
 \toprule
 policy & escalates & accuracy & latency \\
@@ -757,7 +769,7 @@ entropy threshold         & $20\%$ & $0.465$ & $164.7$ \\
 \textbf{probe}            & $20\%$ & $\mathbf{0.475}$ & $\mathbf{144.0}$ \\
 always full               & $100\%$& $0.530$ & $206.0$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \caption{Untrained self-report against uncertainty-based routing, $200$
 held-out examples, latency in milliseconds. Against the stronger self-report
 the probe is $+0.070\ [0.020, 0.120]$ more accurate and $25.8\ [11.9, 39.2]$\,ms
@@ -1350,6 +1362,7 @@ signed gain, and the difference is not academic (Table~\ref{tab:rule}).
 
 \begin{table}[t]
 \centering\small
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lcccc}
 \toprule
 rule & calibration target & escalates & accuracy & latency \\
@@ -1686,11 +1699,15 @@ pages simply being legible at that resolution. The two explanations predict
 opposite things, so we re-ran the entire ladder on SmolVLM-256M over the same
 $1200$ pages: capacity implies the smaller model saturates \emph{earlier},
 legibility implies the same rung with lower accuracy throughout
-(Table~\ref{tab:twomodels}).
+(Table~\ref{tab:twomodels}). A reviewer of an earlier draft made the obvious
+objection to the three models we had then, and it was right: they share a
+lineage and a data recipe, so a common pretraining corpus was an untested
+alternative cause. The fourth row answers it.
 
 \begin{table}[t]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{lccccc}
 \toprule
 & $384$ & $768$ & $1152$ & $2048$ & top step \\
@@ -1698,37 +1715,61 @@ legibility implies the same rung with lower accuracy throughout
 SmolVLM-500M & $0.279$ & $0.662$ & $\mathbf{0.748}$ & $0.746$ & $-0.002$ \\
 SmolVLM-256M & $0.220$ & $0.588$ & $\mathbf{0.653}$ & $0.666$ & $+0.013$ \\
 SmolVLM2-2.2B & $0.413$ & $0.669$ & $\mathbf{0.738}$ & $0.754$ & $+0.016$ \\
+Qwen2-VL-2B & $0.600$ & $0.850$ & $\mathbf{0.890}$ & $0.892$ & $+0.002$ \\
 \midrule
 \multicolumn{6}{l}{\emph{median visual tokens spent at each rung}} \\
 SmolVLM-500M/256M & $64$ & $320$ & $640$ & $1088$ & \\
 SmolVLM2-2.2B & $81$ & $405$ & $\mathbf{810}$ & $1377$ & \\
+Qwen2-VL-2B & $154$ & $567$ & $\mathbf{1312}$ & $4161$ & \\
 \bottomrule
-\end{tabular}
-\caption{ANLS accuracy by rung, three models on the same $1200$ DocVQA pages,
-columns labelled by the pixel target. Every top-step interval is a tight null:
-$[-0.026,+0.022]$, $[-0.012,+0.037]$ and $[-0.011,+0.041]$, half-widths $0.024$
-to $0.026$.}
+\end{tabular}}
+\caption{ANLS accuracy by rung, four models on the same DocVQA pages ($1200$
+for the SmolVLM family, the first $500$ for Qwen2-VL-2B), columns labelled by
+the pixel target. Every top-step interval is a tight null: $[-0.026,+0.022]$,
+$[-0.012,+0.037]$, $[-0.011,+0.041]$ and $[-0.016,+0.020]$, half-widths
+$0.018$ to $0.026$.}
 \label{tab:twomodels}
 \end{table}
 
 It is legibility. Halving the parameters costs accuracy everywhere and moves the
-ceiling nowhere, and all three top-step intervals are tight, so these are
-measured nulls rather than failures to measure. Plotted, the three curves rise
+ceiling nowhere, and all four top-step intervals are tight, so these are
+measured nulls rather than failures to measure. Plotted, the four curves rise
 and then flatten at the same place (Fig.~\ref{fig:saturation}).
+
+\textbf{The ceiling survives leaving the family.} Qwen2-VL-2B shares nothing
+with the SmolVLM line: a NaViT-style encoder that emits tokens in proportion to
+input pixels rather than quantising to a patch grid, a different language
+model, a different data recipe. It is also a far stronger reader of these
+pages, peaking at $0.892$ against the family's best $0.754$. That matters for
+what the null can mean. A model that stops gaining because it is too weak to
+exploit more pixels would prove nothing; this one stops gaining while
+answering $14$ points more of the corpus correctly than any model in the
+family, and while being handed $3.2\times$ the visual tokens to do it with
+($1312$ at the ceiling, $4161$ at full resolution) for a measured
+$+0.002\ [-0.016, +0.020]$. Whatever is left unanswered at $1152$\,px on these
+pages is not waiting on resolution for any of the four models, and the one
+explanation that survives is the one about the paper, not the network.
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-  width=\columnwidth, height=4.8cm,
+  width=\columnwidth, height=5.2cm,
   xlabel={rung (pixel target)}, ylabel={ANLS accuracy},
   symbolic x coords={384,768,1152,2048}, xtick=data,
-  ymin=0.18, ymax=0.82,
+  ymin=0.18, ymax=0.95,
   tick label style={font=\scriptsize}, label style={font=\scriptsize},
-  legend style={font=\scriptsize,at={(0.98,0.03)},anchor=south east,
-                draw=none,fill=none},
+  legend style={font=\scriptsize,at={(0.5,1.02)},anchor=south,
+                legend columns=2,draw=none,fill=none,
+                /tikz/every even column/.append style={column sep=5pt}},
   ymajorgrids, grid style={gwelgrid},
 ]
+\addplot[thick,black,mark=diamond*,mark size=2.6pt,densely dashed] coordinates {
+(384,0.600)(768,0.850)(1152,0.890)(2048,0.892)};
+\addlegendentry{Qwen2-VL-2B}
+\addplot[thick,black!45,mark=pentagon*,mark size=2.2pt,dotted] coordinates {
+(384,0.692)(768,0.800)(1152,0.792)(2048,0.806)};
+\addlegendentry{InternVL3-1B (flat)}
 \addplot[thick,gwelteal,mark=triangle*,mark size=2.4pt] coordinates {
 (384,0.413)(768,0.669)(1152,0.738)(2048,0.754)};
 \addlegendentry{SmolVLM2-2.2B}
@@ -1740,29 +1781,161 @@ and then flatten at the same place (Fig.~\ref{fig:saturation}).
 \addlegendentry{SmolVLM-256M}
 \end{axis}
 \end{tikzpicture}
-\caption{Accuracy against rung on the same $1200$ DocVQA pages. The last step
-is flat for all three, though they spend $640$, $640$ and $810$ visual tokens
-respectively at the rung where it flattens: the ceiling is a resolution, not a
-token budget.}
+\caption{Accuracy against rung on the same DocVQA pages. The last step is flat
+for the four cost ladders, though they spend $640$, $640$, $810$ and $1312$
+visual tokens respectively at the rung where it flattens, so no fixed token
+budget explains the ceiling, and the dashed curve is a model from another
+lineage entirely. The dotted curve is the control: InternVL3-1B spends the
+same tokens at every rung, and flattens one rung earlier, at $768$\,px. Its
+vertical position is not comparable to the others, since its cheapest rung
+already spends a full budget on an upscaled image.}
 \label{fig:saturation}
 \end{figure}
 
-\paragraph{And the ceiling is a resolution, not a sequence length.} The two
-SmolVLM models share an $86$M vision encoder, so ``stops gaining at $1152$\,px''
-and ``stops gaining at $640$ visual tokens'' name the same point for both and
-cannot be told apart. SmolVLM2-2.2B tokenises differently, spending $810$ tokens
-where the others spend $640$, which separates them. All three stop at the same
-\emph{pixel} target while spending different numbers of tokens there.
-\textbf{What runs out is the information in the pixels, not the sequence length
-the model can use.}
+\paragraph{The ceiling is not a token budget.} The two SmolVLM models share an
+$86$M vision encoder, so ``stops gaining at $1152$\,px'' and ``stops gaining at
+$640$ visual tokens'' name the same point for both and cannot be told apart.
+SmolVLM2-2.2B tokenises differently, spending $810$ tokens where the others
+spend $640$, which separates them, and Qwen2-VL-2B spends $1312$ there, a
+$2.05\times$ spread across the four. All four stop at the same \emph{pixel}
+target while spending very different numbers of tokens to reach it, which no
+single sequence-length ceiling explains.
 
-\textbf{That makes the saturation point reusable.} It is a property of the
-corpus, so it can be found once on the data and carried across a change of
-serving model and of vision encoder, which is a far more useful object than a
-threshold that must be re-derived per model. We note in fairness that the two
-smaller-gap models put a positive point estimate on the top step, leaning the
-opposite way from the $500$M; at these interval widths that is noise, and we
-report it rather than claim a symmetry the data does not show.
+\paragraph{But it is not purely a pixel count either, and one model says so.}
+The obvious next sentence, that what runs out is the information in the pixels,
+is the one we wrote in an earlier draft and cannot support. In all four models
+the two quantities travel together: raising the pixel target raises the token
+count, so every rung changes both, and the argument above rules out a
+\emph{fixed} token budget without establishing that tokens do no work.
+Separating them needs a model that spends the same tokens on a small image as
+on a large one, and InternVL3-1B is one by accident of its design. It selects a
+patch grid from the aspect ratio rather than the resolution, so a page
+downsampled to $384$\,px is upscaled again to fill the same tiles as the
+$2048$\,px original. Across $500$ pages all four rungs are token-identical on
+$95\%$ of them and the mean spend moves by $1.02\times$ against $5.3\times$ in
+input pixels: near enough to constant to read the ladder as pixels alone
+(Table~\ref{tab:fixedbudget}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccc}
+\toprule
+step & net gain [95\% CI] & tokens & verdict \\
+\midrule
+$384 \to 768$    & $+0.108\ [+0.070, +0.148]$ & $+16$ & gain \\
+$768 \to 1152$   & $-0.008\ [-0.026, +0.010]$ & $+20$ & null \\
+$1152 \to$ full  & $+0.014\ [-0.002, +0.030]$ & $+38$ & null \\
+\bottomrule
+\end{tabular}
+\caption{InternVL3-1B on $500$ DocVQA pages, where the token budget is
+near constant and only the input pixels move. Accuracy is $0.692$, $0.800$,
+$0.792$, $0.806$ by rung. Both nulls are tight, half-widths $0.018$ and
+$0.016$.}
+\label{tab:fixedbudget}
+\end{table}
+
+With the budget held still, the gain stops one rung earlier, at $768$\,px. The
+$768 \to 1152$ step, worth $+0.086$ to SmolVLM-500M and $+0.040$ to
+Qwen2-VL-2B, is worth $-0.008\ [-0.026, +0.010]$ here. Two readings are open
+and one model cannot close them: either the pixel information of these pages is
+exhausted by $768$\,px and what the other four bought in that step was their
+growing token budget, or InternVL simply reads less of the page. The second is
+the weaker of the two, because InternVL is not the weaker model. It peaks at
+$0.806$ against SmolVLM-500M's $0.748$, so a model that reads \emph{more} of
+this corpus overall is the one that stops gaining from pixels first.
+
+\textbf{What we are entitled to say} is therefore narrower than what we first
+wrote, and more useful. No single token budget explains the ceiling, and pixel
+information alone is spent by $768$\,px; in the band between $768$ and
+$1152$\,px the two are entangled and this paper cannot separate their
+contributions. The serving consequence is untouched, because it never depended
+on the mechanism: on this corpus every model we tested stops paying by
+$1152$\,px, and Algorithm~3 finds that point without needing to know why it is
+there.
+
+\textbf{That makes the saturation point reusable, as a bound.} Across these
+four it survives a change of serving model, of vision encoder and of lineage,
+which is already a more useful object than a threshold re-derived per model.
+It is not a constant, and the fifth model is why: with the token budget held
+flat the ceiling sits a rung lower, at $768$\,px. The direction is the part
+worth keeping. No model we tested needs \emph{more} resolution than the corpus
+ceiling, and one needs less, so the ceiling measured this way is an upper bound
+on what any model needs and running Algorithm~3 against the model actually
+being served can only move it down. A serving stack that caps escalation at the
+corpus ceiling is never wrong about the top of its ladder, only sometimes
+generous. We note in fairness that three of the four put a positive point
+estimate on the top step ($+0.013$, $+0.016$ and $+0.002$), leaning the
+opposite way from the $500$M's $-0.002$; at these interval widths that is
+noise, and we report it rather than claim a symmetry the data does not show.
+
+
+\paragraph{The procedure, and what it costs to run.} If the ceiling is the
+transferable object then it has to be findable on a corpus nobody has measured,
+so we state the procedure we followed rather than only its output
+(Algorithm~3). Two of its steps exist because we got them wrong first. Step~2
+measures the visual tokens each pixel target actually produces instead of
+trusting the target: four of this paper's errors came from a configuration name
+that did not determine a cost, and on our own pilot two nominally different
+rungs turned out to be the same configuration for $56\%$ of examples. Step~6
+refuses to declare a ceiling from a wide interval, which is the failure we
+walked into at $n=244$ on an earlier pass and again, mid-collection, on the
+out-of-lineage run.
+
+\begin{figure}[t]
+\small
+\hrule\vspace{2pt}
+\textbf{Algorithm 3} Locating a corpus's resolution ceiling
+\vspace{1pt}\hrule\vspace{3pt}
+\begin{tabbing}
+xx\=xx\=\kill
+1\> draw $n$ pages from the corpus ($n \geq 300$, Table~\ref{tab:samplesize}) \\
+2\> for each candidate pixel target $p$, \emph{measure} the visual tokens \\
+\> the serving model spends on each page at $p$ \\
+3\> keep the targets whose token counts are strictly increasing \\
+\> on $\geq 95\%$ of pages; discard the rest as duplicates \\
+4\> run every kept rung; record correctness and latency \\
+5\> for each adjacent pair $(r, r')$, bootstrap the paired gain \\
+\> $\bar G_{r \to r'}$ and its $95\%$ interval \\
+6\> \textbf{if} any interval has half-width $> 0.05$ \textbf{then} \\
+\> report undetermined and collect more pages \\
+7\> ceiling $\leftarrow$ highest $r'$ whose interval excludes $0$ \\
+8\> serve with every rung above the ceiling removed \\
+\> (run on the served model: the corpus ceiling bounds it above)
+\end{tabbing}
+\vspace{-4pt}\hrule
+\end{figure}
+
+The cost of running it is small and measurable. Subsampling the pilot and
+recomputing the top-step interval gives the precision a given sample buys
+(Table~\ref{tab:samplesize}): the half-width falls as $0.78/\sqrt{n}$, so the
+$0.05$ bar of step~6 is reached at about $244$ pages, and $300$ pages name the
+same ceiling rung as the full $1200$ on $93\%$ of draws. The row that matters
+most is the first. At $n=100$ the procedure agrees with the full corpus barely
+half the time, which is not a ceiling measurement but a coin flip, and it is
+exactly the trap a practitioner would walk into by eyeballing a small pilot.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccc}
+\toprule
+pages & half-width & p90 & names the same ceiling \\
+\midrule
+$100$  & $0.080$ & $0.090$ & $47\%$ \\
+$200$  & $0.055$ & $0.062$ & $80\%$ \\
+$300$  & $0.045$ & $0.050$ & $93\%$ \\
+$500$  & $0.035$ & $0.038$ & $100\%$ \\
+$800$  & $0.028$ & $0.029$ & $100\%$ \\
+$1200$ & $0.023$ & $0.024$ & $100\%$ \\
+\bottomrule
+\end{tabular}
+\caption{What a sample size buys when locating the ceiling, $200$ draws per
+row on the $1200$-page pilot. Half-width is of the paired top-step interval;
+the last column is how often a run at that size names the rung the full corpus
+names.}
+\label{tab:samplesize}
+\end{table}
 
 \paragraph{The ladder rule finds the ceiling on its own.} Given rungs and
 prices, Eq.~\ref{eq:ladder} selects the top rung on $0\text{--}6\%$ of queries
@@ -1845,6 +2018,7 @@ answer (Table~\ref{tab:localizer}).
 \begin{table}[t]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{lcc}
 \toprule
 & $2\times2$ ($n=500$) & $4\times4$ ($n=400$) \\
@@ -1854,7 +2028,7 @@ best margin & $+0.006$ & $+0.009\ [0.005, 0.014]$ \\
 headroom to the oracle & $0.122$ & $0.162$ \\
 share of the gap closed & n/a & $\mathbf{6\%}$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \caption{Localizer margin over random cell choice, $60$ resampled splits.
 Random is recomputed on each test fold rather than assumed, since the
 cell-correctness rate varies by fold.}
@@ -1945,13 +2119,26 @@ of~\cite{awares} is not overengineering.
 
 \section{Limitations}
 
-Three serving models, one GPU, and two pilots: $1000$ examples across four
-datasets and $1200$ within one, the latter run on all three. The saturation
-ceiling is the claim we have pushed hardest, over an $8.6\times$ parameter range
-and two distinct vision encoders, and it has not moved. What we cannot say is
-whether it would move for a family trained differently: all three models come
-from one lineage and one data recipe, so a shared pretraining corpus remains a
-possible common cause. Our strongest baseline is
+Five serving models, one GPU, and two pilots: $1000$ examples across four
+datasets and $1200$ within one, the latter run on all five. The saturation
+ceiling is the claim we have pushed hardest, over an $8.6\times$ parameter
+range, three vision-encoder mechanisms and two lineages. It held across four of
+the five and moved down a rung on the fifth, the one whose token budget does
+not follow its input resolution, which is why we state it as a bound rather
+than a constant. Every rung of it was
+measured on DocVQA, whose pages carry print of a fairly narrow size range, and
+the claim we are entitled to is that a corpus has a legibility ceiling that
+bounds every model's useful resolution from above and can be found once, not
+that $1152$\,px is that ceiling for corpora we did not measure, nor that a
+given model needs all of it. A benchmark of denser scans or smaller type should place it
+higher, and the procedure for finding it (Algorithm~3), not the number, is what
+transfers. The mechanism behind the ceiling is also only partly settled: we can
+rule out a fixed token budget and we can show pixel information alone is spent
+by $768$\,px, but the band between $768$ and $1152$\,px moves both quantities
+at once in every model whose tokeniser is resolution-sensitive, and separating
+their contributions there would need a model whose token budget can be dialled
+independently of its input size.
+Our strongest baseline is
 the published escalation \emph{mechanism} without its training; a re-implemented
 VisionThink at sub-1B scale remains the comparison the field would want, and the
 gap between an untrained self-report and a trained one is exactly what we cannot
@@ -2017,7 +2204,7 @@ uncertain.
 
 Every numeric claim in this paper is re-derived from the run records by a
 validation harness with an explicit threshold per claim, which exits non-zero if
-any stops holding; it currently checks fifty-eight, including the negative
+any stops holding; it currently checks sixty-three, including the negative
 results on localization, on our own energy instrument, and on the universality
 of Pareto dominance, that last one asserts the claim is \emph{not} universal,
 so restating it too strongly fails the build. Claims stated in the text and
@@ -2072,7 +2259,9 @@ preference produces a different escalation rate per domain without retuning. The
 resolution ladder carries most of the money that was attributed to the
 escalate/answer decision: on document pages, $93\%$ of what escalation repairs
 is repaired below the top rung, and the ceiling sits at a pixel resolution that
-three models with two vision encoders agree on.
+four models with three tokenisers and two lineages agree on. A fifth, whose
+token budget does not follow its input resolution, stops one rung earlier, so
+that ceiling is the most any model needs rather than what each one needs.
 
 The comparison that decides whether any of this matters is against randomising
 between fixed configurations, which needs no signal. The standard entropy
@@ -2080,7 +2269,8 @@ threshold never clears that bar on our mixture; the probe clears it only because
 it is read mid-prefill; the ladder clears it on homogeneous traffic. Where a
 single fixed rung fits the budget, pinning it at the corpus's measured
 saturation point is the right policy, and per-query routing is for the traffic
-no single rung fits.
+no single rung fits. Both need the ceiling measured rather than guessed, which
+is why we state the procedure and its price alongside the number.
 
 The result we would most like others to carry away is the negative one in
 \S\ref{sec:policy}, which we encountered four times. A probe trained on the

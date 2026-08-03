@@ -20,7 +20,7 @@ intervals. Forty examples is small: read the direction, not the third digit.
 
 > **Every claim below is checked by `scripts/validate_claims.py`**, which
 > re-derives it from the data with an explicit threshold and fails loudly if it
-> stops holding. Current state: 60 checks, 60 passing. Claims that are stated
+> stops holding. Current state: 63 checks, 63 passing. Claims that are stated
 > here but *not* covered by a check should be treated as unverified.
 
 > **A Pareto-dominance claim made elsewhere in this repository was
@@ -44,6 +44,26 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > baseline. On the 1200 DocVQA pages the thumbnail suffices for 27.9%, a higher
 > rung repairs 49.9%, and 13.0% fail at every rung including full resolution.
 > See `ANGLES.md` §0-figures, checks Q1-Q2.
+
+> **The corpus ceiling is an upper bound, not a constant.** It transports
+> across four models spanning 8.6x parameters, two lineages and three
+> tokenisers, and InternVL3-1B saturates one rung below it. No model we tested
+> needed more than the corpus ceiling, so capping escalation there is never
+> wrong about the top of the ladder, and running Algorithm 3 on the served
+> model can only lower it. See `ANGLES.md` §0-fixedbudget, checks R8 and R12.
+
+> **The saturation ceiling survives leaving the model family.** Qwen2-VL-2B,
+> which shares no encoder mechanism, language model or data recipe with
+> SmolVLM, stops gaining at the same 1152 px rung: +0.002 [-0.016, +0.020] for
+> 3.2x the visual tokens, the tightest of the four nulls. It peaks 14 accuracy
+> points above the family, so this is not a weak model failing to use pixels.
+> See `ANGLES.md` §0-outlineage, checks R8 and R10.
+
+> **Locating a corpus's resolution ceiling takes about 300 pages, and 100 is a
+> coin flip.** The paired top-step half-width falls as 0.78/sqrt(n): the 0.05
+> precision bar is reached at 244 pages, 300 pages name the same ceiling rung as
+> the full 1200 on 93% of draws, and 100 pages on 47%. See `ANGLES.md`
+> §0-procedure, check R11, Algorithm 3 in the paper.
 
 > **A flat per-configuration latency under-charges escalation by 16%.** The
 > profiling image did not actually escalate. Per-example costing shrinks the
@@ -78,10 +98,16 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > capacity, so the saturation point can be measured once per corpus and carried
 > across a change of serving model. See `ANGLES.md` §0-corpus, check R8.
 
-> **And the ceiling is a pixel resolution, not a token budget.** SmolVLM2-2.2B
-> has a different vision encoder and spends 810 visual tokens where the others
-> spend 640, yet stops gaining at the same pixel target. What runs out is the
-> information in the pixels. See `ANGLES.md` §0-encoder, check R9.
+> **No single token budget explains the ceiling, but it is not purely pixels
+> either.** Four models stop at the same pixel target while spending 640, 640,
+> 810 and 1312 visual tokens there, which rules out a fixed sequence length.
+> Against that, InternVL3-1B holds its token budget near constant across the
+> ladder (identical on 95% of pages, 1.02x mean spread against 5.3x in pixels)
+> and stops a rung earlier, at 768 px: the 768 to 1152 step is -0.008 [-0.026,
+> +0.010] there against +0.040 to +0.086 elsewhere. An earlier version of this
+> entry claimed "what runs out is the information in the pixels" and that
+> claim is now bounded. See `ANGLES.md` §0-encoder and §0-fixedbudget, checks
+> R9 and R12.
 
 > **The headline AUROC claim does not survive family-wise correction.** Added to
 > the Holm family, the probe-vs-entropy ranking gain on the recovery target is

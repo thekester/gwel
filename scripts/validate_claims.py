@@ -1411,14 +1411,18 @@ def _():
     )
 
 
-@check("R9: the ceiling sits at a pixel resolution, not at a sequence length")
+@check("R9: no single token budget explains the ceiling")
 def _():
-    """A third model with a different vision encoder separates the two.
+    """Models with different tokenisers stop at the same pixel target.
 
     SmolVLM-500M and 256M share an 86M encoder, so "saturates at 1152 px" and
     "saturates at 640 visual tokens" name the same point for both. SmolVLM2-2.2B
-    tokenises differently, so the two come apart, and only one of them can be
-    where all three stop gaining.
+    and Qwen2-VL-2B tokenise differently, so the two come apart, and no single
+    sequence length is where all of them stop gaining.
+
+    This rules out a fixed token budget. It does not establish that tokens do
+    no work, because pixels and tokens co-vary in all four; R12 is the
+    experiment that separates them, and it stops the claim here.
     """
     summary = json.loads(Path("results/saturation_models.json").read_text())
     runs = summary["runs"]
@@ -1439,7 +1443,7 @@ def _():
     )
 
 
-@check("R8: saturation is a property of the corpus, not of the serving model")
+@check("R8: the ceiling is stable across serving models that spend tokens with resolution")
 def _():
     """Two models, half the parameters apart, on the same 1200 pages.
 
@@ -1447,6 +1451,13 @@ def _():
     saturate earlier if the ceiling is its own, and at the same rung with lower
     accuracy throughout if the ceiling is the images. Both nulls must also be
     tight, or this compares two failures to measure.
+
+    The claim is deliberately class-restricted. Every model in this artefact
+    raises its visual-token count with the pixel target, so the rung transports
+    across them; R12 shows a model that decouples the two saturating lower, so
+    this rung is an upper bound rather than a constant, and the check asserts
+    that framing holds by refusing to pass if a flat-budget run is ever mixed
+    into the ladder comparison.
     """
     summary = json.loads(Path("results/saturation_models.json").read_text())
     runs = summary["runs"]
@@ -1464,11 +1475,153 @@ def _():
     lower_everywhere = smaller is not None and all(
         smaller[c] < reference[c] for c in reference if c != "full"
     )
-    ok = same and tight and lower_everywhere
+    # The class restriction, asserted rather than trusted to the prose: every
+    # run compared here must actually raise its token count with the pixel
+    # target, so that "same rung" is a statement about a coherent family.
+    resolution_sensitive = all(
+        r["median_tokens"]["full"] > 1.5 * r["median_tokens"]["lowres_384"]
+        for r in runs
+    )
+    ok = same and tight and lower_everywhere and resolution_sensitive
     return ("PASS" if ok else "FAIL"), (
         f"{len(runs)} models saturate at {set(rungs.values())}; nulls tight={tight}; "
         f"the smaller model is less accurate at every rung below the "
-        f"ceiling={lower_everywhere}"
+        f"ceiling={lower_everywhere}; every model compared grows its token "
+        f"count with resolution={resolution_sensitive}"
+    )
+
+
+@check("R10: the ceiling survives outside the lineage it was measured in")
+def _():
+    """R8 tests three models that share a training recipe, so a common
+    pretraining corpus stays a live alternative cause. This adds a model that
+    shares none of it: a different encoder mechanism (tokens proportional to
+    pixels, no patch-grid buckets), a different language model, a different
+    data recipe.
+
+    The test has to survive both ways it could be vacuous. A model that
+    saturates because it is too weak to use the pixels proves nothing, so the
+    out-of-lineage model must be substantially *more* accurate than the
+    lineage, not less. And its top-step null must be tight, or this is an
+    absence of measurement rather than an absence of gain.
+    """
+    summary = json.loads(Path("results/saturation_models.json").read_text())
+    runs = summary["runs"]
+    lineage = [r for r in runs if "SmolVLM" in r["model"]]
+    outside = [r for r in runs if "SmolVLM" not in r["model"]]
+    if not outside:
+        return "SKIP", "no out-of-lineage run in the artefact"
+    if not lineage:
+        return "SKIP", "no lineage runs to compare against"
+
+    rung = lineage[0]["saturation_rung"]
+    same = all(r["saturation_rung"] == rung for r in runs)
+    top_nulls = [
+        s for r in outside for s in r["steps"]
+        if s["to"] == "full" and s["null"]
+    ]
+    tight = bool(top_nulls) and all(s["informative"] for s in top_nulls)
+
+    best_lineage = max(max(r["accuracy"].values()) for r in lineage)
+    stronger = [r for r in outside if max(r["accuracy"].values()) > best_lineage]
+    # The point of a different encoder is a different token schedule; if it
+    # matched the lineage's, this would be the same experiment twice.
+    distinct_tokens = [
+        r for r in outside
+        if r["median_tokens"]["full"] > 1.5 * lineage[0]["median_tokens"]["full"]
+    ]
+    ok = same and tight and bool(stronger) and bool(distinct_tokens)
+    names = ", ".join(r["model"].split("/")[-1] for r in outside)
+    detail_acc = "; ".join(
+        f"{r['model'].split('/')[-1]} peaks at {max(r['accuracy'].values()):.3f} "
+        f"against the lineage's {best_lineage:.3f}"
+        for r in outside
+    )
+    return ("PASS" if ok else "FAIL"), (
+        f"{names} saturate at {rung} like the lineage={same}, top-step null "
+        f"tight={tight}, more accurate than the lineage={bool(stronger)}, "
+        f"token schedule differs={bool(distinct_tokens)}; {detail_acc}"
+    )
+
+
+@check("R11: the ceiling procedure states a sample size, and a small pilot cannot meet it")
+def _():
+    """Algorithm 3 is only usable if it says how much data it needs.
+
+    Two things must hold for the paper's statement of it. The precision must
+    improve with n at the square-root rate the sample-size rule assumes, and
+    the smallest row must genuinely fail: if 100 pages already named the right
+    ceiling, the warning in the text would be scaremongering rather than a
+    measurement.
+    """
+    art = json.loads(Path("results/ceiling_sample_size.json").read_text())
+    rows = {r["n"]: r for r in art["rows"]}
+    widths = [rows[n]["median_half_width"] for n in sorted(rows)]
+    monotone = all(a > b for a, b in zip(widths, widths[1:], strict=False))
+    small = rows[100]["verdict_agreement"]
+    large = rows[500]["verdict_agreement"]
+    needed = art["pages_for_null_precision"]
+    # The stated rule must land between the rows that bracket it, or the paper
+    # is quoting a sample size its own table contradicts.
+    bracketed = rows[200]["median_half_width"] > art["null_precision"] > rows[300][
+        "median_half_width"
+    ]
+    ok = (
+        monotone
+        and small <= 0.6
+        and large >= 0.95
+        and bracketed
+        and 200 <= needed <= 300
+    )
+    return ("PASS" if ok else "FAIL"), (
+        f"half-width {widths[0]:.3f} at n=100 down to {widths[-1]:.3f} at "
+        f"n={max(rows)}, monotone={monotone}; agreement {small:.0%} at n=100 "
+        f"and {large:.0%} at n=500; rule says {needed} pages for a "
+        f"{art['null_precision']} bar, bracketed by the table={bracketed}"
+    )
+
+
+@check("R12: with the token budget held still, pixels alone stop paying a rung earlier")
+def _():
+    """The control that stops R9 from being read as more than it is.
+
+    Three things have to hold before this experiment says anything. The token
+    budget must actually be near constant, or it is just another ladder. The
+    step where the other models still gain must be a null here, and a tight
+    one. And the model must not be the weakest in the comparison, or "it stops
+    early because it reads badly" explains everything without any appeal to
+    pixels.
+    """
+    art = json.loads(Path("results/fixed_budget.json").read_text())
+    steps = {f"{s['from']}->{s['to']}": s for s in art["steps"]}
+    contested = steps["lowres_768->lowres_1152"]
+    budget_flat = art["token_spread"] <= 1.10 and art["rungs_token_identical"] >= 0.90
+    null_here = contested["null"] and contested["informative"]
+
+    saturation = json.loads(Path("results/saturation_models.json").read_text())
+    others = {
+        r["model"]: r for r in saturation["runs"]
+    }
+    gains_elsewhere = [
+        s["gain"]
+        for r in others.values()
+        for s in r["steps"]
+        if s["from"] == "lowres_768" and s["to"] == "lowres_1152"
+    ]
+    pays_elsewhere = all(g > 0.02 for g in gains_elsewhere)
+    peak = max(art["accuracy"].values())
+    weakest = min(max(r["accuracy"].values()) for r in others.values())
+    not_weakest = peak > weakest
+    ok = budget_flat and null_here and pays_elsewhere and not_weakest
+    return ("PASS" if ok else "FAIL"), (
+        f"tokens {art['token_spread']:.2f}x across rungs against "
+        f"{art['pixel_spread']:.1f}x in pixels, identical on "
+        f"{art['rungs_token_identical']:.0%} of pages; 768->1152 is "
+        f"{contested['gain']:+.3f} [{contested['low']:+.3f}, "
+        f"{contested['high']:+.3f}] here against "
+        f"{min(gains_elsewhere):+.3f} to {max(gains_elsewhere):+.3f} elsewhere; "
+        f"ceiling {art['ceiling']}; peaks at {peak:.3f}, above the weakest "
+        f"compared model's {weakest:.3f}={not_weakest}"
     )
 
 

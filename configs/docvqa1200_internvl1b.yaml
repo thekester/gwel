@@ -1,24 +1,35 @@
-# The saturation ceiling, in a sub-billion model outside every lineage so far.
+# Pixels against tokens, with the token budget nailed shut.
 #
 # InternVL3-1B is 0.94B parameters: an InternViT-300M encoder with dynamic
-# tiling (448 px tiles, up to 12) and a Qwen2.5-0.5B language model. Nothing is
-# shared with SmolVLM (SigLIP encoder, pixel-shuffle, SmolLM2) and the encoder
-# family differs from Qwen2-VL's NaViT-style patching too. Same 1200 pages,
-# same manifest, same pixel rungs.
+# tiling (448 px tiles) and a Qwen2.5-0.5B language model. Nothing is shared
+# with SmolVLM (SigLIP, pixel-shuffle, SmolLM2) or with Qwen2-VL's NaViT-style
+# proportional patching.
 #
-# Together with Qwen2-VL-2B this closes the two open axes of the saturation
-# claim at once: out-of-lineage at the paper's own sub-billion scale, and a
-# third distinct resolution mechanism (fixed grid buckets / proportional
-# patching / tiling). If this model also stops gaining at 1152 px, the ceiling
-# is a property of the corpus's print size; if it keeps gaining, the claim
-# narrows to the families it was measured on.
+# This config does NOT measure a cost ladder. InternVL's tiling reads the
+# aspect ratio far more than the resolution: a page downsampled to 384 px on
+# its longest edge is usually upscaled again to fill the same 12 tiles plus
+# thumbnail as the 2048 px original.
 #
-# crop_to_patches is the load-bearing line: the HF default resizes every input
-# to a single 448 px tile, which would collapse all four rungs into one
-# configuration. That is the exact failure mode documented in the paper
-# (configurations must differ on the data, not in the config file), so the
-# engine refuses unknown override names and the run must be smoke-tested for
-# distinct visual-token counts per rung before collection.
+# The smoke test suggested this was exact and it is not, which is worth
+# recording because it is the same mistake this project keeps making. On one
+# page all four rungs gave pixel_values (13, 3, 448, 448), 3328 tokens. On the
+# corpus, all four rungs are token-identical on 94% of pages, every rung has
+# median 3328, and the mean spend rises from 3117 to 3216 across the ladder, a
+# 3% spread against a 5.3x spread in input pixels. Near-constant, not constant:
+# any claim built on this config has to be stated at that strength.
+#
+# That makes this model the control the resolution claim never had. Everywhere
+# else in the paper, pixels and visual tokens move together, so "more pixels
+# stop helping" and "more tokens stop helping" cannot be told apart from the
+# accuracy curve alone. Here the token budget is constant by construction and
+# only the pixel information varies. If accuracy still climbs to 1152 px and
+# then flattens, the ceiling is legibility of the corpus, measured with
+# sequence length held fixed. If accuracy is flat across all four rungs
+# instead, the earlier ladders were measuring their token budgets and the
+# paper's reading has to change.
+#
+# crop_to_patches is load-bearing: the HF default sends one 448 px tile, which
+# would discard most of every page before the question is asked.
 
 model:
   model_id: OpenGVLab/InternVL3-1B-hf

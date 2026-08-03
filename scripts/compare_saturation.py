@@ -117,9 +117,15 @@ def main() -> None:
         default=[
             "configs/docvqa1200_2b.yaml",
             "configs/docvqa1200_qwen2b.yaml",
-            "configs/docvqa1200_internvl1b.yaml",
         ],
-        help="further models; the last two are outside the SmolVLM lineage",
+        # InternVL3-1B is deliberately absent. This script compares cost
+        # ladders, and its rungs are not one: its tiling reads the aspect ratio
+        # rather than the resolution, so every rung spends the same tokens and
+        # the steps here would price nothing. It is analysed by
+        # scripts/analyze_fixed_budget.py instead, where a flat budget is the
+        # point rather than a defect. Passing it explicitly still works and
+        # will show its ceiling sitting a rung lower than the others.
+        help="further models; the last is outside the SmolVLM lineage",
     )
     parser.add_argument("--out", default="results/saturation_models.json")
     args = parser.parse_args()
@@ -200,7 +206,12 @@ def main() -> None:
         print(
             f"All {len(runs)} models stop gaining at the same rung, which points at\n"
             "the images: the pages are legible at that resolution and the remaining\n"
-            "errors are not resolution-limited."
+            "errors are not resolution-limited.\n"
+            "Note the class this holds in. Every model here spends more visual\n"
+            "tokens as the pixel target rises, so each rung moves pixels and\n"
+            "sequence length together. A model that decouples them saturates a\n"
+            "rung lower (scripts/analyze_fixed_budget.py), so read this rung as\n"
+            "an upper bound on what any model needs, not as a constant."
         )
     else:
         print(

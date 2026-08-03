@@ -62,6 +62,8 @@ python scripts/analyze_cache_sensitivity.py  # can KV reuse refund the probe?
 python scripts/resplit_dominance.py       # does Pareto dominance survive resplitting?
 python scripts/make_domain_bars.py        # what resolution buys, per dataset
 python scripts/make_qualitative_figure.py # the escalation taxonomy on real pages
+python scripts/ceiling_sample_size.py    # how many pages locate a corpus ceiling?
+python scripts/analyze_fixed_budget.py   # pixels or tokens? one model separates them
 python scripts/make_figure_data.py        # pgfplots coordinates for the paper figures
 python scripts/probe_cross_model.py       # can a smaller model decide for a larger one
 python scripts/profile_components.py      # encoder / projector / prefill / decode split

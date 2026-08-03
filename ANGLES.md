@@ -338,7 +338,7 @@ the same examples.
 
 ---
 
-## 0-encoder. The ceiling is a resolution, not a sequence length, tested
+## 0-encoder. No single token budget explains the ceiling, tested
 
 **The last limitation on the saturation result, removed.**
 
@@ -362,14 +362,24 @@ them (`configs/docvqa1200_2b.yaml`, check R9).
 | SmolVLM2-2.2B | 81 | 405 | **810** | 1377 |
 
 **All three stop at the same pixel target while spending different numbers of
-tokens there.** So what runs out is the information in the pixels, not the
-sequence length the model can exploit. Every top-step interval is a tight null
-(half-widths 0.024 to 0.026), so these are measured nulls, not failures to
-measure.
+tokens there**, and Qwen2-VL-2B spends 1312 there, a 2.05x spread across four
+models. No single sequence length is where all of them stop. Every top-step
+interval is a tight null (half-widths 0.018 to 0.026), so these are measured
+nulls, not failures to measure.
 
-**The saturation point is therefore transportable** across a change of serving
-model *and* of vision encoder: measure it once on a corpus, reuse it. That is a
-much more useful object than a per-model threshold.
+**What this does NOT establish**, and an earlier version of this section said
+it did: that the pixels are what runs out. Pixels and tokens co-vary in all
+four models, so ruling out a *fixed* token budget leaves open whether tokens do
+work inside the ladder. §0-fixedbudget is the experiment that bounds it, and it
+moved the claim.
+
+**The saturation point is therefore transportable as an upper bound** across a
+change of serving model *and* of vision encoder: measure it once on a corpus,
+and no model needs more than it. §0-fixedbudget shows it is not a constant,
+because a model whose token budget stays flat needs one rung less, so running
+Algorithm 3 on the served model can only move the ceiling down. Capping
+escalation at the corpus ceiling is never wrong about the top of the ladder,
+only sometimes generous.
 
 **What still cannot be said.** All three models come from one lineage and one
 data recipe, so a shared pretraining corpus remains a possible common cause. The
@@ -381,6 +391,52 @@ still read `if len(runs) == 2`. I had fixed that assumption in the comparison
 script and not in the harness, so the harness silently evaluated
 `lower_everywhere = False` and failed. The same edit, applied in one place and
 not the other.
+
+---
+
+## 0-fixedbudget. Pixels or tokens? A model that spends the same either way
+
+**Why the previous section could not settle it.** Raising the pixel target
+raises the visual-token count in every model whose tokeniser is
+resolution-sensitive, so each rung changes both quantities and the accuracy
+curve cannot attribute the gain. §0-encoder rules out a *fixed* token budget;
+it cannot show tokens are inert.
+
+**The control** (`configs/docvqa1200_internvl1b.yaml`,
+`scripts/analyze_fixed_budget.py`, check R12). InternVL3-1B picks its patch
+grid from the aspect ratio rather than the resolution: a page downsampled to
+384 px is upscaled again to fill the same tiles as the 2048 px original. Across
+500 pages, all four rungs are token-identical on **95%** of them, and the mean
+spend moves **1.02x** against **5.3x** in input pixels.
+
+| step | net gain [95% CI] | tokens added | verdict |
+| --- | --- | --- | --- |
+| 384 to 768 | +0.108 [+0.070, +0.148] | +16 | gain |
+| 768 to 1152 | −0.008 [−0.026, +0.010] | +20 | null, half-width 0.018 |
+| 1152 to full | +0.014 [−0.002, +0.030] | +38 | null, half-width 0.016 |
+
+Accuracy by rung: 0.692 / 0.800 / 0.792 / 0.806. **With the budget held still
+the ceiling moves down a rung, to 768 px.** The 768 to 1152 step is worth
++0.086 to SmolVLM-500M and +0.040 to Qwen2-VL-2B, and −0.008 here.
+
+**Two readings, one model, so neither closes.** Either the pixel information of
+these pages is exhausted by 768 px and the other models bought that step with
+their growing token budget, or InternVL reads less of the page. The second is
+weaker: InternVL peaks at 0.806 against SmolVLM-500M's 0.748, so the model that
+reads *more* of this corpus is the one that stops gaining from pixels first.
+
+**What changed in the paper.** The sentence "what runs out is the information
+in the pixels, not the sequence length the model can use" is gone. What
+replaces it: no single token budget explains the ceiling, pixel information
+alone is spent by 768 px, and the 768 to 1152 band entangles the two beyond
+what this paper can separate. The serving consequence is untouched, because it
+never depended on the mechanism.
+
+**The smoke test also lied and that is recorded.** One page gave identical
+3328-token counts at all four rungs, and I wrote "constant by construction"
+into the config header. On the corpus it is 95% of pages, not 100%. Same
+failure family as the four measurement errors in §0-cost: a single
+observation generalised to a corpus.
 
 ---
 
@@ -413,10 +469,11 @@ Same 1200 pages, same manifest, same rungs, only the answering model changes
 moves the ceiling nowhere. Both nulls are tight, so this is two measured nulls
 rather than two failures to measure.
 
-**Why this matters for deployment.** The saturation point is a property of the
-**data**. It can be found once on a corpus and carried across a change of
-serving model, which is a far more useful object than a threshold that has to be
-re-derived per model.
+**Why this matters for deployment.** The saturation point is largely a property
+of the **data**. It can be found once on a corpus and carried across a change of
+serving model as an upper bound: §0-fixedbudget found a model that saturates one
+rung earlier, none that saturates later. A bound found once beats a threshold
+re-derived per model, and re-deriving it can only tighten it.
 
 **Honest note.** The 256M point estimate on the top step is *positive* (+0.013),
 leaning opposite to the 500M's −0.002. At these interval widths that is noise,
@@ -428,6 +485,81 @@ The 256M interval was +0.012 [−0.045, +0.070], which contains zero only becaus
 the sample could not resolve it. The script now refuses a verdict unless a null
 interval has half-width under 0.05, and prints UNDETERMINED instead. **Without
 that guard I would have reported the reverse conclusion with confidence.**
+
+---
+
+## 0-outlineage. The saturation ceiling leaves the family, tested
+
+**The objection that had to be answered.** Three models agreed on the ceiling,
+but they were SmolVLM-256M, 500M and SmolVLM2-2.2B: one lineage, one data
+recipe. A shared pretraining corpus was an untested alternative cause of the
+agreement, and the paper said so in its limitations.
+
+**The test.** Qwen2-VL-2B on the same DocVQA pages (first 500), same pixel
+rungs. It shares nothing with the family: a NaViT-style encoder emitting tokens
+in proportion to input pixels rather than quantising to a patch grid, a Qwen2
+language model, a different data recipe.
+
+| model | 384 | 768 | 1152 | 2048 | top step |
+| --- | --- | --- | --- | --- | --- |
+| SmolVLM-500M | 0.279 | 0.662 | **0.748** | 0.746 | -0.002 |
+| SmolVLM-256M | 0.220 | 0.588 | **0.653** | 0.666 | +0.013 |
+| SmolVLM2-2.2B | 0.413 | 0.669 | **0.738** | 0.754 | +0.016 |
+| Qwen2-VL-2B | 0.600 | 0.850 | **0.890** | 0.892 | +0.002 |
+
+**Same rung, and the null is the tightest of the four**: +0.002 [-0.016,
++0.020], half-width 0.018. Two features make it hard to dismiss. Qwen is far
+*stronger* on this corpus (0.892 against the family's best 0.754), so
+"saturates because it is too weak to use the pixels" does not apply; and it is
+handed 3.2x the visual tokens at the top rung (1312 at the ceiling, 4161 at
+full) for nothing measurable.
+
+**The token-versus-pixel separation also widens.** The four models spend 640,
+640, 810 and 1312 visual tokens at the rung where each flattens, a 2.05x
+spread, and all four flatten at the same *pixel* target. Check R10, and R8
+still passes with four models.
+
+**What this does not license.** The ceiling is now a property of the corpus
+across lineages, but every rung was measured on DocVQA. The transferable object
+is the procedure for finding the ceiling once on a corpus, not the number 1152.
+The limitations section was rewritten to say that instead of the lineage
+caveat.
+
+---
+
+## 0-procedure. The ceiling is only transferable if it is findable, priced
+
+**The gap.** Once the ceiling was shown to belong to the corpus rather than the
+model, the paper's transferable object stopped being the number 1152 and became
+the procedure that finds it. The procedure was never written down, and a
+procedure without a sample size is not usable.
+
+**Measured, not assumed** (`scripts/ceiling_sample_size.py`, check R11). Draw n
+pages, recompute the paired top-step interval, 200 draws per size:
+
+| pages | half-width | p90 | names the same ceiling as the full corpus |
+| --- | --- | --- | --- |
+| 100 | 0.080 | 0.090 | 47% |
+| 200 | 0.055 | 0.062 | 80% |
+| 300 | 0.045 | 0.050 | 93% |
+| 500 | 0.035 | 0.038 | 100% |
+| 800 | 0.028 | 0.029 | 100% |
+| 1200 | 0.023 | 0.024 | 100% |
+
+**Half-width falls as 0.78/sqrt(n)**, so the 0.05 precision bar is reached at
+about 244 pages and 300 pages agree with the full corpus 93% of the time.
+
+**The first row is the useful one.** At n=100 the procedure names the right
+ceiling barely half the time. That is not a conservative caveat, it is the
+error I made twice: a premature verdict at n=244 on an earlier pass, and a
+wrong reading of the out-of-lineage run at n=104 mid-collection, where the
+apparent peak at 1152 px reversed by the end. The precision bar in step 6 of
+Algorithm 3 exists because of those two.
+
+**Algorithm 3** also encodes the other recurring error: step 2 measures the
+visual tokens each pixel target actually produces rather than trusting the
+target, because four of this paper's measurement errors came from a
+configuration name that did not determine a cost.
 
 ---
 
