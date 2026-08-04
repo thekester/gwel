@@ -230,6 +230,43 @@ favours them.
 
 ---
 
+## 0-tworegimes. Which signal pays is a property of the traffic, tested
+
+**The half-measured claim.** §0-free shows a free image descriptor matching the
+probe across a benchmark mixture. If it also routed inside a single workload,
+nothing in this project would justify reading the model. That was never
+measured, and it is the pivot of the whole argument.
+
+**Measured** (`scripts/free_signal_single_domain.py`, check CV4). Same 1200
+DocVQA pages, same verified rungs, per-example prices, hull from all four fixed
+rungs, 30 resamples.
+
+| policy | V=400 | V=800 | V=1600 | V=3200 |
+| --- | --- | --- | --- | --- |
+| ladder, entropy | **+0.041** | **+0.025** | **+0.010** | +0.001 |
+| ladder, image size | +0.0001 | -0.001 | -0.004 | -0.004 |
+| binary, entropy | -0.003 | -0.081 | -0.017 | -0.015 |
+| binary, image size | -0.026 | -0.052 | -0.012 | -0.010 |
+
+**Inside the workload image size predicts the top-rung gain at AUROC 0.508**,
+which is chance, against entropy's 0.667. It clears nothing. Two of its
+negative points do not survive Holm, so the honest reading is that it sits *at*
+the hull rather than below it: it buys nothing, it is not harmful.
+
+**The inversion is the result.** Across a mixture: free descriptor clears,
+entropy never does, probe is redundant. Inside a workload: free descriptor at
+chance, entropy on a graded ladder is the only thing that clears, binary
+escalation fails with either signal. **Neither regime is the general case, and a
+method evaluated only on a mixture will recommend the wrong signal for a
+workload.**
+
+This also dissolves the awkwardness of our own negatives. The probe fails
+inside a domain and is redundant across one; entropy fails across a mixture and
+is the only signal that works inside one. Both are the same fact: a signal is
+worth exactly the variance it explains that free metadata does not.
+
+---
+
 ## 0-free. The signal that costs nothing beats the one we built, tested
 
 **The objection.** The confound audit reports image size scoring 0.748 against
@@ -248,7 +285,7 @@ costings, gap to the randomisation hull:
 | probe (flat prices) | +0.053 | +0.050 | +0.033 | +0.001 |
 | **image size, free** | **+0.061** | +0.050 | +0.024 | +0.009 |
 | entropy | -0.001 | -0.012 | -0.028 | -0.022 |
-| random + abort | -0.000 | -0.007 | -0.001 | -0.001 |
+| random + abort | -0.0005 | -0.007 | -0.001 | -0.001 |
 | probe (per-example) | +0.033 | +0.032 | +0.021 | -0.001 |
 | **image size (per-example)** | **+0.034** | +0.027 | +0.011 | +0.002 |
 
@@ -319,6 +356,48 @@ probe clears at all seven rates (+0.006 to +0.056). The one-fold impression was
 noise. Both parameterisations now live in the artefact and CV1 asserts both.
 Attribution added: random allocation is a standard baseline in text routing
 (Lugoloobi et al. plot against it); the visual escalation literature omits it.
+
+---
+
+## 0-holm41. The family grew with the experiments, and now costs six claims
+
+**The error I made.** Four experiments were added after the multiplicity pass
+(free signal, random abort, domain ceiling, token axis), each reporting paired
+intervals the prose leans on. The Holm family stayed at 14. The paper's stated
+family-wise guarantee was therefore false for everything added, which is the
+exact failure §0-multiplicity exists to prevent.
+
+**A second error, caught by reading the output.** My first fix synthesised a
+400-point normal sample per interval and fed it to the existing bootstrap. That
+bootstrap estimates the standard error of a mean *over observations*, so it
+divided the spread by sqrt(400) and returned p at the resolution floor for
+every test, including intervals plainly spanning zero. The reported interval is
+already the sampling distribution of the estimate; the p-value is now read from
+it directly, `2(1 - Phi(|estimate| / (half-width / 1.96)))`, and the normal
+approximation is stated in the script.
+
+**The result.** 41 tests, 30 clear the nominal level, **24 survive Holm**.
+Uncorrected family-wise error is 88%. Six claims are lost:
+
+| lost claim | p | Holm p |
+| --- | --- | --- |
+| probe vs entropy AUROC on the recovery target | 0.041 | 0.497 |
+| free signal minus probe, flat, V=1600 | 0.035 | 0.460 |
+| free signal minus probe, per-example, V=800 | 0.026 | 0.385 |
+| free signal clears the hull, per-example, V=3200 | 0.008 | 0.128 |
+| tile budget 12 to 24, all pages | 0.031 | 0.435 |
+| tile budget 12 to 24, tokens actually spent | 0.023 | 0.372 |
+
+**Three of the six are convenient for us**, which is the reason to name them
+individually. Two are preferences at which the probe nominally beat the free
+image descriptor: losing them makes the two signals *harder* to distinguish and
+costs the apparatus this paper built. Check X1 asserts they are among the
+losses rather than merely counting six.
+
+**What survives.** Every cost comparison, every pixel-axis gain, the
+domain-identity bound, and the free signal's clearance of the hull at all
+preferences but the loosest per-example one. **What no longer survives**: the
+claim that extra visual tokens actively hurt. That is now an observation.
 
 ---
 
@@ -484,6 +563,53 @@ never depended on the mechanism.
 into the config header. On the corpus it is 95% of pages, not 100%. Same
 failure family as the four measurement errors in §0-cost: a single
 observation generalised to a corpus.
+
+---
+
+## 0-corpus2. A second corpus, and the prediction it refutes, tested
+
+**The prediction.** The paper stated that 1152 px is DocVQA's ceiling and not a
+universal one, and predicted explicitly that a benchmark of denser type should
+place it higher. That was an assertion with nothing behind it.
+
+**The test** (`configs/infovqa500.yaml`, `scripts/compare_corpora.py`, check
+R14). 500 InfographicVQA pages, same task, same ANLS metric, same pixel
+targets, Algorithm 3 run unchanged.
+
+| corpus | 384 | 768 | 1152 | 2048 | ceiling |
+| --- | --- | --- | --- | --- | --- |
+| DocVQA (n=1200) | 0.279 | 0.662 | **0.748** | 0.746 | 1152 px |
+| InfographicVQA (n=500) | 0.230 | 0.282 | **0.368** | 0.360 | 1152 px |
+
+**Median visual tokens at each target:**
+
+| corpus | 384 | 768 | 1152 | 2048 |
+| --- | --- | --- | --- | --- |
+| DocVQA | 64 | 320 | **640** | 1088 |
+| InfographicVQA | 64 | 192 | **320** | 576 |
+
+**The prediction fails.** The ceiling does not move; both corpora stop paying
+at 1152 px and both top steps are tight nulls (−0.002 [−0.024, +0.022] and
+−0.008 [−0.044, +0.028]).
+
+**And the claim it was attached to gets stronger.** The same pixel target costs
+640 tokens on DocVQA and 320 on InfographicVQA, whose pages are tall and narrow
+and fill fewer patches at a given longest edge: **exactly 2.00x apart at an
+identical ceiling**. With §0-encoder's 2.05x spread across models, the ceiling
+is now invariant to the model at fixed corpus and to the corpus at fixed pixel
+target, while the token spend varies twofold on both axes. A token budget
+cannot be what runs out if two corpora exhaust it at half each other's spend.
+
+**What does not transfer.** On InfographicVQA the model is much weaker (0.368
+against 0.748 at the ceiling) and the ladder's edge over the hull nearly
+vanishes: one operator preference of four (+0.006 [+0.002, +0.011] at V=800)
+instead of three. The free image descriptor fails here too, at every
+preference, which is a second confirmation of §0-tworegimes. Where most queries
+are unanswerable at any rung, there is little for any policy to allocate.
+
+**Holm.** The InfographicVQA 384 to 768 step (+0.052) does not survive the
+correction; the 768 to 1152 step (+0.086) does, and it is the one that sets the
+ceiling, so the determination is unaffected.
 
 ---
 
@@ -682,7 +808,7 @@ others about, committed on itself.
 | variant | acc @400 ms | acc @500 ms |
 | --- | --- | --- |
 | **reference** | **0.653** | **0.743** |
-| no per-example pricing | 0.650 (−0.003) | 0.744 (+0.000) |
+| no per-example pricing | 0.650 (−0.003) | 0.744 (+0.0004) |
 | no calibration (tuned rate) | 0.431 (−0.221) | 0.571 (−0.172) |
 | no ladder (binary) | 0.281 (**−0.372**) | 0.622 (−0.121) |
 | no gain target (UCCI) | 0.278 (−0.375) | 0.611 (−0.133) |
@@ -1052,7 +1178,7 @@ is right everywhere. Checks W1-W2.
 
 **A refinement of ours that does not pay, check W3.** Since escalation prices
 vary 2.5x across the pilot, charging each query its own break-even
-`tau_i = dt_i / V` looked obviously right. Measured: +0.000 [-0.000, +0.000]
+`tau_i = dt_i / V` looked obviously right. Measured: +0.00002 [-0.0003, +0.0004]
 accuracy, -1.5 [-4.3, +0.4] ms. Both span zero. **The reason is the confound
 again**: image size is largely a *domain* property, so within a domain the
 prices a per-query rule would discriminate between barely differ. It would

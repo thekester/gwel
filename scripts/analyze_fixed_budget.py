@@ -39,6 +39,8 @@ def interval(delta: np.ndarray, rng) -> dict:
     means = delta[rng.integers(0, len(delta), (BOOT, len(delta)))].mean(axis=1)
     low, high = (float(x) for x in np.percentile(means, [2.5, 97.5]))
     return {
+        # Kept so the multiplicity family can bootstrap this exactly.
+        "vector": [float(d) for d in delta],
         "gain": float(delta.mean()),
         "low": low,
         "high": high,

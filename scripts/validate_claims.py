@@ -47,6 +47,19 @@ def check(claim: str):
     return wrap
 
 
+def _signed(value: float, digits: int = 3) -> str:
+    """Format with a sign, widening rather than rounding a nonzero value to zero.
+
+    A value of -0.0005 printed at three decimals reads ``-0.000``, which is both
+    ugly and ambiguous: the reader cannot tell a signed rounding artefact from an
+    exact zero. An exact zero still prints as ``+0.000``, so the determinism
+    checks keep saying what they mean.
+    """
+    while value != 0.0 and abs(round(value, digits)) < 10.0**-digits:
+        digits += 1
+    return f"{value:+.{digits}f}"
+
+
 def _records(path: str):
     from gwel.data.scoring import ScoringPolicy, rescore_records
     from gwel.oracle.records import deduplicate_records, read_records
@@ -1044,7 +1057,8 @@ def _():
     accuracy_null = accuracy[1] <= 0.0 <= accuracy[2]
     latency_null = latency[1] <= 0.0 <= latency[2]
     return ("PASS" if accuracy_null and latency_null else "FAIL"), (
-        f"accuracy {accuracy[0]:+.3f} [{accuracy[1]:+.3f}, {accuracy[2]:+.3f}], "
+        f"accuracy {_signed(accuracy[0])} "
+        f"[{_signed(accuracy[1])}, {_signed(accuracy[2])}], "
         f"latency {latency[0]:+.1f} [{latency[1]:+.1f}, {latency[2]:+.1f}] ms: "
         f"both span zero"
     )
@@ -1268,14 +1282,17 @@ def _():
     )
 
 
-@check("X1: exactly one claim is lost to the correction, and it is the headline ranking")
+@check("X1: every claim lost to the correction is named, including the convenient ones")
 def _():
-    """The paper asked fourteen paired questions; Holm says which to believe.
+    """Holm over the whole family, with the losses enumerated rather than
+    summarised.
 
-    Every cost claim survives. The one loss is the abstract's most visible
-    number, the probe's AUROC advantage on the recovery target: nominally
-    significant, adjusted p above 0.05. Asserted so the paper cannot quietly
-    restate that advantage as established.
+    The family grew as experiments were added, and three of its losses are
+    comparisons in which our probe nominally beat the free image descriptor.
+    Losing those makes the two signals harder to tell apart, which is the
+    direction that costs us the apparatus, so the check asserts they are among
+    the losses rather than merely counting them. It also asserts the headline
+    AUROC is still lost, which was the original point.
     """
     summary = json.loads(Path("results/multiplicity.json").read_text())
     nominal, survivors = summary["nominal"], summary["survivors"]
@@ -1284,11 +1301,23 @@ def _():
         t["name"] for t in summary["tests"]
         if t["p_value"] <= summary["alpha"] and not t["survives"]
     ]
-    ok = survivors == nominal - 1 and lost and "AUROC" in lost[0]
+    headline_lost = any("AUROC" in name for name in lost)
+    # Comparisons where the probe nominally beat the free signal: if any of
+    # those survived while the headline did not, the paper would be keeping
+    # exactly the claims that flatter it.
+    convenient = [n for n in lost if "free signal minus probe" in n]
+    every_test_scored = total >= 40
+    ok = (
+        headline_lost
+        and bool(convenient)
+        and survivors == nominal - len(lost)
+        and every_test_scored
+    )
     return ("PASS" if ok else "FAIL"), (
-        f"{nominal}/{total} clear the nominal level, {survivors} survive Holm; "
-        f"lost: {lost[0] if lost else 'none'} "
-        f"(uncorrected family-wise error {summary['family_wise_error_uncorrected']:.0%})"
+        f"{nominal}/{total} clear the nominal level, {survivors} survive Holm, "
+        f"{len(lost)} lost including the headline AUROC={headline_lost} and "
+        f"{len(convenient)} probe-favouring comparison(s); uncorrected "
+        f"family-wise error {summary['family_wise_error_uncorrected']:.0%}"
     )
 
 
@@ -1650,10 +1679,13 @@ def _():
     # The free signal has to be competitive with the probe, not merely positive:
     # if the probe beat it everywhere the pre-generation read would be earning
     # its cost after all.
+    # The artefact stores both the interval and the resample vector behind it;
+    # only the intervals carry the estimate this compares.
     spread = max(
-        abs(v[0])
+        abs(row[0])
         for costing in ("flat", "per-example")
-        for v in art[costing]["free minus probe"].values()
+        for key, row in art[costing]["free minus probe"].items()
+        if not key.endswith("vector")
     )
     ok = free_clears and not random_clears and spread <= 0.02
     return ("PASS" if ok else "FAIL"), (
@@ -1743,6 +1775,95 @@ def _():
         f"{second['share_where_tokens_rose']:.0%} of pages and gives "
         f"{spent['gain']:+.3f} there; the unchanged-token control is exactly "
         f"zero over {control['n']} pages={control_exact}"
+    )
+
+
+@check("CV4: the two regimes invert, and neither signal works in both")
+def _():
+    """The paper's central claim, asserted as an inversion rather than as two
+    separate observations.
+
+    Across a mixture, the free image descriptor clears the randomisation hull
+    and output entropy does not. Inside one workload it has to be the other way
+    round, or the claim is a coincidence of two datasets rather than a property
+    of traffic heterogeneity. Both halves are required, and the free
+    descriptor's within-workload signal must be at chance, since a weak but
+    real signal would make this a difference of degree.
+    """
+    mixture = json.loads(Path("results/free_signal.json").read_text())
+    single = json.loads(Path("results/free_signal_docvqa.json").read_text())
+
+    mix = mixture["per-example"]["preference swept"]
+    free_clears_mixture = all(
+        row["gap"][1] > 0 for name, row in mix.items() if name.startswith("image size")
+    )
+    entropy_fails_mixture = all(
+        row["gap"][2] <= 0.005
+        for name, row in mix.items()
+        if name.startswith("entropy")
+    )
+
+    free_fails_single = all(
+        row["gap"][1] <= 0
+        for name, row in single.items()
+        if name.startswith("ladder, image size")
+    )
+    entropy_clears_single = any(
+        row["gap"][1] > 0
+        for name, row in single.items()
+        if name.startswith("ladder, entropy")
+    )
+    # A graded action space is the other half: binary escalation must fail on
+    # the same corpus with the same signal, or the ladder is not what pays.
+    binary_fails_single = all(
+        row["gap"][2] <= 0
+        for name, row in single.items()
+        if name.startswith("binary,")
+    )
+    ok = (
+        free_clears_mixture
+        and entropy_fails_mixture
+        and free_fails_single
+        and entropy_clears_single
+        and binary_fails_single
+    )
+    return ("PASS" if ok else "FAIL"), (
+        f"mixture: free clears={free_clears_mixture}, entropy fails="
+        f"{entropy_fails_mixture}; workload: free clears nothing="
+        f"{free_fails_single}, entropy ladder clears={entropy_clears_single}, "
+        f"every binary policy fails={binary_fails_single}"
+    )
+
+
+@check("R14: two corpora share a pixel ceiling and spend twice as differently to reach it")
+def _():
+    """Algorithm 3 run unchanged on a corpus it was not designed against.
+
+    Two things have to hold together, and the pair is the claim. The ceiling
+    must land on the same pixel target, or the number is DocVQA's alone. And
+    the visual-token count spent to reach it must differ substantially, or the
+    two corpora do not separate a pixel ceiling from a token budget. Both top
+    steps must also be measured nulls under the procedure's own precision bar,
+    since a wide interval would mean the ceiling was never located.
+    """
+    art = json.loads(Path("results/corpus_ceilings.json").read_text())
+    runs = art["runs"]
+    if len(runs) < 2:
+        return "SKIP", "only one corpus present"
+    same_px = art["same_ceiling_px"]
+    spread = art["token_spread"]
+    tops = [r["steps"][-1] for r in runs]
+    tight = all(t["null"] and t["half_width"] <= 0.05 for t in tops)
+    undetermined = [r["label"] for r in runs if r["undetermined"]]
+    ok = same_px and spread >= 1.5 and tight and not undetermined
+    names = ", ".join(
+        f"{r['label']} {r['ceiling_px']}px at {r['tokens_at_ceiling']:.0f} tokens"
+        for r in runs
+    )
+    return ("PASS" if ok else "FAIL"), (
+        f"{names}; same pixel ceiling={same_px}, token spend differs by "
+        f"{spread:.2f}x, both top steps tight nulls={tight}"
+        + (f"; UNDETERMINED on {undetermined}" if undetermined else "")
     )
 
 

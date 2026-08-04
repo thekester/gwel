@@ -145,6 +145,7 @@ def main() -> None:
             "accuracy": float(np.mean([t[0] for t in triples])),
             "latency": float(np.mean([t[1] for t in triples])),
             "gap": [gap.estimate, gap.low, gap.high],
+            "gap_vector": [float(t[2]) for t in triples],
         }
         print(
             f"{name:<26}{out[name]['accuracy']:>10.3f}"

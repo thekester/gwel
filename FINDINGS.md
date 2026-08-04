@@ -20,7 +20,7 @@ intervals. Forty examples is small: read the direction, not the third digit.
 
 > **Every claim below is checked by `scripts/validate_claims.py`**, which
 > re-derives it from the data with an explicit threshold and fails loudly if it
-> stops holding. Current state: 66 checks, 66 passing. Claims that are stated
+> stops holding. Current state: 68 checks, 68 passing. Claims that are stated
 > here but *not* covered by a check should be treated as unverified.
 
 > **A Pareto-dominance claim made elsewhere in this repository was
@@ -45,6 +45,13 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > rung repairs 49.9%, and 13.0% fail at every rung including full resolution.
 > See `ANGLES.md` §0-figures, checks Q1-Q2.
 
+> **Two corpora share a pixel ceiling and spend twice as differently to reach
+> it, and a stated prediction failed.** We predicted a denser corpus would place
+> the ceiling above DocVQA's 1152 px. InfographicVQA stops at the same target,
+> spending 320 visual tokens there against DocVQA's 640, exactly 2.00x apart.
+> With the 2.05x spread across models, a token budget cannot be what runs out.
+> See `ANGLES.md` §0-corpus2, check R14.
+
 > **The corpus ceiling is an upper bound, not a constant.** It transports
 > across four models spanning 8.6x parameters, two lineages and three
 > tokenisers, and InternVL3-1B saturates one rung below it. No model we tested
@@ -64,6 +71,14 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > precision bar is reached at 244 pages, 300 pages name the same ceiling rung as
 > the full 1200 on 93% of draws, and 100 pages on 47%. See `ANGLES.md`
 > §0-procedure, check R11, Algorithm 3 in the paper.
+
+> **Which signal pays is a property of the traffic, and the two regimes
+> invert.** Across the mixture the free image descriptor clears the hull and
+> entropy never does. Inside DocVQA image size falls to 0.508 AUROC and clears
+> nothing, while entropy on the graded ladder clears at +0.041 to +0.001 and
+> binary escalation fails with either signal. A method evaluated only on a
+> mixture will recommend the wrong signal for a workload. See `ANGLES.md`
+> §0-tworegimes, check CV4.
 
 > **A signal that costs nothing matches the probe, and dataset identity bounds
 > both.** Routing on raw image size clears the randomisation hull at every
@@ -125,6 +140,14 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > entry claimed "what runs out is the information in the pixels" and that
 > claim is now bounded. See `ANGLES.md` §0-encoder and §0-fixedbudget, checks
 > R9 and R12.
+
+> **The Holm family is 41 tests and costs six claims, three of them convenient
+> for us.** Adding the review-driven experiments grew the family from 14; 30
+> clear the nominal level and 24 survive. Lost: the headline AUROC (0.041 to
+> 0.497), two preferences where the probe nominally beat the free image
+> descriptor, the free signal's weakest hull clearance, and both readings of the
+> harmful top step in the token-axis control. See `ANGLES.md` §0-holm41, check
+> X1.
 
 > **The headline AUROC claim does not survive family-wise correction.** Added to
 > the Holm family, the probe-vs-entropy ranking gain on the recovery target is

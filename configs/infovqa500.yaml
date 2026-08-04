@@ -1,0 +1,90 @@
+# The corpus the saturation claim predicted, collected to test the prediction.
+#
+# The paper states that 1152 px is DocVQA's legibility ceiling and not a
+# universal one, and predicts explicitly that "a benchmark of denser scans or
+# smaller type should place it higher". InfographicVQA is that benchmark: the
+# same task, the same ANLS metric, and pages that are typically larger and
+# carry a much wider range of type sizes than the letters and memos of DocVQA.
+#
+# This config therefore tests a stated prediction rather than adding a second
+# dataset for coverage. Three outcomes are informative and all are reportable:
+# the ceiling moves up (the prediction holds and the corpus-specific reading is
+# confirmed by forecast rather than asserted), it does not move (the number is
+# more general than claimed, and the claim should be widened), or the ladder
+# never saturates within the rungs we run (the corpus needs rungs above 2048 px
+# and the procedure of Algorithm 3 says so by refusing to name a ceiling).
+#
+# Rungs are the same pixel targets as docvqa1200 so the two corpora are read on
+# one axis. Step 2 of Algorithm 3 still applies: the visual-token counts each
+# target actually produces must be verified distinct on this corpus before the
+# steps are priced, since a configuration name does not determine a cost.
+
+model:
+  model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/infovqa500
+  pilot_manifest: data/processed/infovqa500/manifest.jsonl
+  records: results/runs/infovqa500_records.jsonl
+  labels: results/runs/infovqa500_labels.jsonl
+  router_dir: results/router-infovqa500
+
+runner:
+  lowres_sizes: [384, 768, 1152]
+  full_longest_side: 2048
+  # The resolution ladder only; crops and OCR are not read by this study.
+  include_crop: false
+  include_ocr: false
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: false
+    region_longest_side: 768
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005
+  lambda_energy_per_mj: 0.000002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 120
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 5000
+  image_dir: data/processed/infovqa500/images
+  per_dataset:
+    infographicvqa: 500

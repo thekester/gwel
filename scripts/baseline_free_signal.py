@@ -225,6 +225,7 @@ def paired(rows: dict, left: str, right: str, values) -> dict:
         delta = [x[2] - y[2] for x, y in zip(a, b, strict=True)]
         interval = bootstrap_interval(delta)
         out[f"V={value:.0f}"] = [interval.estimate, interval.low, interval.high]
+        out[f"V={value:.0f} vector"] = [float(d) for d in delta]
         verdict = (
             "free signal wins" if interval.low > 0
             else "probe wins" if interval.high < 0
@@ -244,6 +245,9 @@ def summarise(rows: dict, label: str) -> dict:
             "accuracy": float(np.mean([t[0] for t in triples])),
             "latency": float(np.mean([t[1] for t in triples])),
             "gap": [gap.estimate, gap.low, gap.high],
+            # Kept so the multiplicity pass can bootstrap this comparison
+            # exactly rather than approximating it from the interval.
+            "gap_vector": [float(t[2]) for t in triples],
         }
         print(
             f"{name:<22}{out[name]['accuracy']:>10.3f}"

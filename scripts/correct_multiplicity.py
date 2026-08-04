@@ -222,6 +222,67 @@ def headline_auroc_test():
     return ("P1 AUROC: probe vs entropy on the recovery target", p)
 
 
+def review_tests() -> list[tuple[str, list[float]]]:
+    """Paired comparisons added after the first multiplicity pass.
+
+    Each artefact stores the per-resample (or per-example) vector behind its
+    interval, so these are scored by the same bootstrap as the rest of the
+    family rather than by an approximation to a reported width. An earlier
+    version reconstructed a p-value from the interval instead; it is kept out
+    of the repository because it treated a sampling distribution as a set of
+    observations and returned the resolution floor for every test.
+
+    Only comparisons the text leans on as evidence enter the family. Nulls are
+    included too, since excluding them would make the correction selective.
+    """
+    tests: list[tuple[str, list[float]]] = []
+
+    def add(name: str, vector) -> None:
+        if vector:
+            tests.append((name, [float(v) for v in vector]))
+
+    free = json.loads(Path("results/free_signal.json").read_text())
+    for costing in ("flat", "per-example"):
+        for name, row in free[costing]["preference swept"].items():
+            if name.startswith("image size"):
+                add(f"CV2 free signal clears the hull, {costing}, {name}",
+                    row.get("gap_vector"))
+        for key, row in free[costing]["free minus probe"].items():
+            if key.endswith("vector"):
+                add(f"CV2 free signal minus probe, {costing}, {key[:-7]}", row)
+
+    domain = json.loads(Path("results/domain_policy.json").read_text())
+    for name, row in domain["policies"].items():
+        if name.startswith("domain label"):
+            add(f"CV3 domain label clears the hull, {name}", row.get("gap_vector"))
+
+    single = json.loads(Path("results/free_signal_docvqa.json").read_text())
+    for name, row in single.items():
+        add(f"CV4 single-domain hull gap, {name}", row.get("gap_vector"))
+
+    tile = json.loads(Path("results/tile_budget_analysis.json").read_text())
+    for step in tile["steps"]:
+        for key in ("all", "tokens_rose"):
+            block = step.get(key)
+            if block:
+                add(f"R13 tile budget {step['from']} to {step['to']} ({key})",
+                    block.get("vector"))
+
+    corpora = json.loads(Path("results/corpus_ceilings.json").read_text())
+    for run in corpora["runs"]:
+        for step in run["steps"]:
+            add(
+                f"R14 {run['label']} rung gain {step['from']} to {step['to']}",
+                step.get("vector"),
+            )
+
+    budget = json.loads(Path("results/fixed_budget.json").read_text())
+    for step in budget["steps"]:
+        add(f"R12 fixed budget {step['from']} to {step['to']}", step.get("vector"))
+
+    return tests
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--alpha", type=float, default=0.05)
@@ -229,7 +290,7 @@ def main() -> None:
     args = parser.parse_args()
 
     family: list[tuple[str, list[float]]] = []
-    for source in (mixture_tests, single_domain_tests):
+    for source in (mixture_tests, single_domain_tests, review_tests):
         try:
             family.extend(source())
         except FileNotFoundError as error:

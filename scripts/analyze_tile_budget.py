@@ -32,6 +32,8 @@ def interval(delta: np.ndarray, rng) -> dict:
     low, high = (float(x) for x in np.percentile(draws, [2.5, 97.5]))
     return {
         "n": int(len(delta)),
+        # Kept so the multiplicity family can bootstrap this exactly.
+        "vector": [float(d) for d in delta],
         "gain": float(delta.mean()),
         "low": low,
         "high": high,

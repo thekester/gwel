@@ -20,6 +20,13 @@ DATASET_SOURCES: dict[str, dict[str, str]] = {
     "vqav2": {"path": "lmms-lab/VQAv2", "split": "validation"},
     "textvqa": {"path": "lmms-lab/textvqa", "split": "validation"},
     "docvqa": {"path": "lmms-lab/DocVQA", "name": "DocVQA", "split": "validation"},
+    # Same task and metric as DocVQA on denser, larger pages: the corpus the
+    # saturation claim predicts should place its ceiling higher.
+    "infographicvqa": {
+        "path": "lmms-lab/DocVQA",
+        "name": "InfographicVQA",
+        "split": "validation",
+    },
     "vstar": {"path": "craigwu/vstar_bench", "split": "test"},
 }
 

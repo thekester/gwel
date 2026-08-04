@@ -17,6 +17,7 @@ DATASET_METRICS: dict[str, str] = {
     "vqav2": "vqa",
     "textvqa": "vqa",
     "docvqa": "anls",
+    "infographicvqa": "anls",
     "vstar": "exact",
 }
 

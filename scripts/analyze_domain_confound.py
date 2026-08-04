@@ -195,8 +195,19 @@ def main() -> None:
     weights = np.array([row["n"] for row in within], dtype=float)
     probe_mean = float(np.average([row["probe"] for row in within], weights=weights))
     entropy_mean = float(np.average([row["entropy"] for row in within], weights=weights))
-    results["within_weighted"] = {"probe": probe_mean, "entropy": entropy_mean}
-    print(f"{'weighted':<10}{'':>6}{probe_mean:>22.3f}{entropy_mean:>22.3f}")
+    # The free descriptor belongs in the aggregate too: the paper quotes it
+    # beside the other two, and storing only the per-dataset values made that
+    # number reachable by recomputation alone.
+    size_mean = float(np.average([row["image_size"] for row in within], weights=weights))
+    results["within_weighted"] = {
+        "probe": probe_mean,
+        "entropy": entropy_mean,
+        "image_size": size_mean,
+    }
+    print(
+        f"{'weighted':<10}{'':>6}{probe_mean:>22.3f}{entropy_mean:>22.3f}"
+        f"{size_mean:>9.3f}"
+    )
 
     # --- is layer 6 simply the wrong depth for a within-domain probe? ------
     largest = max(within, key=lambda row: row["n"] * row["probe"] if False else row["n"])
