@@ -64,6 +64,10 @@ python scripts/make_domain_bars.py        # what resolution buys, per dataset
 python scripts/make_qualitative_figure.py # the escalation taxonomy on real pages
 python scripts/ceiling_sample_size.py    # how many pages locate a corpus ceiling?
 python scripts/analyze_fixed_budget.py   # pixels or tokens? one model separates them
+python scripts/baseline_free_signal.py   # does a free header read beat the probe?
+python scripts/oracle_domain_policy.py   # what is knowing the dataset worth?
+python scripts/tile_budget_ladder.py     # the token axis, with pixels held fixed
+python scripts/analyze_tile_budget.py    # read by tokens spent, not by config name
 python scripts/make_figure_data.py        # pgfplots coordinates for the paper figures
 python scripts/probe_cross_model.py       # can a smaller model decide for a larger one
 python scripts/profile_components.py      # encoder / projector / prefill / decode split

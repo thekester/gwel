@@ -230,6 +230,53 @@ favours them.
 
 ---
 
+## 0-free. The signal that costs nothing beats the one we built, tested
+
+**The objection.** The confound audit reports image size scoring 0.748 against
+the probe's 0.761 and calls it "nearly as good". It was never built into a
+policy, which is the comparison that decides the paper: a signal read from the
+file header does not just rank almost as well, it *prices* differently. A
+policy on it decides before anything runs, so an escalated query never pays for
+a cheap pass it discards, and its cost structure is exactly the randomisation
+it is compared against.
+
+**Measured** (`scripts/baseline_free_signal.py`, check CV2), 30 resamples, both
+costings, gap to the randomisation hull:
+
+| policy | V=400 | V=800 | V=1600 | V=3200 |
+| --- | --- | --- | --- | --- |
+| probe (flat prices) | +0.053 | +0.050 | +0.033 | +0.001 |
+| **image size, free** | **+0.061** | +0.050 | +0.024 | +0.009 |
+| entropy | -0.001 | -0.012 | -0.028 | -0.022 |
+| random + abort | -0.000 | -0.007 | -0.001 | -0.001 |
+| probe (per-example) | +0.033 | +0.032 | +0.021 | -0.001 |
+| **image size (per-example)** | **+0.034** | +0.027 | +0.011 | +0.002 |
+
+**Image size clears the hull at every operating point of both costings.**
+Paired against the probe over the same resamples it wins at two of four
+preferences under flat prices and loses at two under per-example prices, never
+by more than 0.010. On this mixture the pre-generation read buys nothing the
+file header does not already supply.
+
+**And the abort mechanism alone buys nothing.** Random escalation with the same
+mid-prefill abandonment never clears the hull. This *corrects* the paper, which
+attributed the probe's margin to the abort: the margin comes from the signal,
+and the signal is domain identity.
+
+**The ceiling on that** (`scripts/oracle_domain_policy.py`, check CV3). A
+policy given the dataset label, escalating a *random* subset within each
+dataset at a per-dataset tuned rate, reaches +0.080 / +0.075 / +0.060 / +0.051
+and dominates the probe everywhere while using nothing about any individual
+query. It escalates 100% of DocVQA and 13% of VQAv2. **On a benchmark mixture,
+essentially all the adaptive gain available is the gain from knowing which
+benchmark you are serving.**
+
+Selection inside a dataset must stay random. A first version sorted by true
+gain, which measures a per-query oracle rather than the label, and reported
++0.165; that number is wrong and does not appear anywhere.
+
+---
+
 ## 0-hull. Most routing fails the baseline that needs no signal, tested
 
 **The comparator a hostile review demanded, and the paper lacked.** Any point on
@@ -560,6 +607,52 @@ Algorithm 3 exists because of those two.
 visual tokens each pixel target actually produces rather than trusting the
 target, because four of this paper's measurement errors came from a
 configuration name that did not determine a cost.
+
+---
+
+## 0-tokens. The other axis, with the pixels held still, tested
+
+**Why it was needed.** §0-fixedbudget moves pixels with the token spend held
+near constant and finds the gain stopping a rung earlier. That alone leaves two
+readings open, because in every other model both quantities move together. The
+converse experiment closes the pair: pin the input at full resolution and move
+the token budget instead.
+
+**The mechanism.** InternVL picks the aspect-ratio-closest tile grid *under* a
+`max_patches` bound, so raising the bound raises the token count without
+touching a pixel of the source (`scripts/tile_budget_ladder.py`,
+`scripts/analyze_tile_budget.py`, check R13). 500 pages, input pinned at
+2048 px.
+
+| step | pages | extra tokens | net gain [95% CI] |
+| --- | --- | --- | --- |
+| 1280 to 3328 tokens | 500 | +2011 | +0.024 [-0.006, +0.054] |
+| next bound, tokens rose | 240 | +2258 | **-0.046 [-0.087, -0.008]** |
+| next bound, tokens unchanged | 260 | 0 | +0.000 [+0.000, +0.000] |
+
+**I designed the second step wrong and the analysis caught it.** I assumed
+`max_patches=24` would triple the tokens again. It binds on only **48%** of
+pages, because the chosen grid was already under the old bound elsewhere. Read
+by the bound's name the step is -0.022; read by what it actually spent it is
+-0.046 where the tokens went and exactly 0.000 where they did not. That is the
+fourth-error family of §0-cost, committed on an experiment built for this
+paper, and the split is now the reported form.
+
+**The unchanged subset is a free determinism check.** Identical input, identical
+sequence, greedy decoding: +0.000 [+0.000, +0.000] over 260 pages, exactly as
+required. It is what licenses believing the other subset.
+
+**The separation.** Tokens at fixed pixels: +0.024, null, informative. Pixels
+at fixed tokens (§0-fixedbudget): +0.108 over one rung. **On this corpus the
+binding constraint is pixel information, and sequence length is not scarce.**
+Spending past the useful point is actively harmful, which is the premise the
+token-pruning literature works from.
+
+**What this does not license.** The four models whose tokeniser follows
+resolution still move both quantities at every rung, so their 768 to 1152 px
+gains are not decomposed by this. And the extra tiles come from upscaling the
+same source further, so "more tokens hurt" here may be interpolation rather
+than sequence length as such.
 
 ---
 

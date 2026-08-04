@@ -1625,6 +1625,127 @@ def _():
     )
 
 
+@check("CV2: a signal costing nothing clears the hull, and the abort mechanism alone does not")
+def _():
+    """The two comparators that decide what the probe is worth.
+
+    Image size is read from the file header, so a policy on it skips the cheap
+    pass entirely on escalated queries and prices exactly like the
+    randomisation it is compared against. Any gap it opens is bought by the
+    signal. The random-plus-abort policy is the converse control: same abort,
+    no signal. Both verdicts must hold under both costings, or the result is an
+    artefact of the pricing the paper itself rejects.
+    """
+    art = json.loads(Path("results/free_signal.json").read_text())
+    free_clears, random_clears, worst_free = True, False, 1.0
+    for costing in ("flat", "per-example"):
+        block = art[costing]["preference swept"]
+        for name, row in block.items():
+            estimate, low, high = row["gap"]
+            if name.startswith("image size"):
+                free_clears = free_clears and low > 0.0
+                worst_free = min(worst_free, low)
+            if name.startswith("random, abort") and low > 0.0:
+                random_clears = True
+    # The free signal has to be competitive with the probe, not merely positive:
+    # if the probe beat it everywhere the pre-generation read would be earning
+    # its cost after all.
+    spread = max(
+        abs(v[0])
+        for costing in ("flat", "per-example")
+        for v in art[costing]["free minus probe"].values()
+    )
+    ok = free_clears and not random_clears and spread <= 0.02
+    return ("PASS" if ok else "FAIL"), (
+        f"image size clears the hull at every preference of both costings="
+        f"{free_clears} (worst interval low {worst_free:+.3f}); random plus "
+        f"abort never clears={not random_clears}; paired against the probe the "
+        f"free signal is within {spread:.3f} everywhere"
+    )
+
+
+@check("CV3: dataset identity alone bounds every signal in the paper")
+def _():
+    """The control that turns the confound from a correlation into a ceiling.
+
+    A policy given the dataset label, escalating a random subset within each
+    dataset, must dominate the probe at every preference. If it did not, the
+    probe would be reading something beyond identity and the confound story
+    would be incomplete. Selection inside a dataset has to stay random, which
+    the script enforces; here we check the consequence.
+    """
+    art = json.loads(Path("results/domain_policy.json").read_text())
+    policies = art["policies"]
+    values = sorted(
+        {name.split("V=")[1] for name in policies if name.startswith("probe")},
+        key=float,
+    )
+    dominates, margins = True, []
+    for value in values:
+        label = policies[f"domain label, tuned rate V={value}"]["gap"]
+        probe = policies[f"probe V={value}"]["gap"]
+        margins.append(label[0] - probe[0])
+        dominates = dominates and label[1] > probe[0]
+    clears = all(
+        policies[f"domain label, tuned rate V={v}"]["gap"][1] > 0 for v in values
+    )
+    # The rates it picks must track escalation value per domain, or the bound
+    # is arithmetic rather than meaningful.
+    rates = art["oracle_rates"]
+    docvqa = np.mean([v for k, v in rates.items() if k.startswith("docvqa")])
+    vqav2 = np.mean([v for k, v in rates.items() if k.startswith("vqav2")])
+    ordered = docvqa > 2 * vqav2
+    ok = dominates and clears and ordered
+    return ("PASS" if ok else "FAIL"), (
+        f"the label bound clears the hull at every preference={clears} and "
+        f"dominates the probe={dominates} by {min(margins):+.3f} to "
+        f"{max(margins):+.3f}; it escalates {docvqa:.0%} of DocVQA against "
+        f"{vqav2:.0%} of VQAv2"
+    )
+
+
+@check("R13: with the pixels held still, extra visual tokens do not repay their cost")
+def _():
+    """The converse of R12, and the pair that separates the two axes.
+
+    Three conditions. The token gain at fixed pixels must be a null, and a
+    tight one, or the experiment found nothing rather than nothing to find.
+    The step must be read by what it actually spent rather than by the bound's
+    name, since the bound binds on only part of the corpus. And the pages where
+    the bound changed no tokens must show exactly zero difference: they receive
+    an identical input and an identical sequence under greedy decoding, so
+    anything else would mean the measurement itself is noisy.
+    """
+    art = json.loads(Path("results/tile_budget_analysis.json").read_text())
+    steps = {(s["from"], s["to"]): s for s in art["steps"]}
+    first = steps[(4, 12)]["all"]
+    second = steps[(12, 24)]
+    control = second["tokens_unchanged"]
+    spent = second["tokens_rose"]
+    if control is None or spent is None:
+        return "SKIP", "the second bound did not split the corpus"
+
+    token_null = first["null"] and first["informative"]
+    control_exact = (
+        abs(control["gain"]) < 1e-12
+        and abs(control["low"]) < 1e-12
+        and abs(control["high"]) < 1e-12
+    )
+    # Where the tokens were actually spent, the effect must not be a gain: the
+    # claim is that sequence length is not the binding constraint here.
+    not_a_gain = spent["low"] <= 0.0
+    partial = 0.2 <= second["share_where_tokens_rose"] <= 0.8
+    ok = token_null and control_exact and not_a_gain and partial
+    return ("PASS" if ok else "FAIL"), (
+        f"tripling tokens at fixed pixels gives {first['gain']:+.3f} "
+        f"[{first['low']:+.3f}, {first['high']:+.3f}], null and informative="
+        f"{token_null}; the next bound binds on "
+        f"{second['share_where_tokens_rose']:.0%} of pages and gives "
+        f"{spent['gain']:+.3f} there; the unchanged-token control is exactly "
+        f"zero over {control['n']} pages={control_exact}"
+    )
+
+
 @check("P6: the linear probe is a justified choice, not an untested limitation")
 def _():
     """Capacity is measured rather than argued away.

@@ -20,7 +20,7 @@ intervals. Forty examples is small: read the direction, not the third digit.
 
 > **Every claim below is checked by `scripts/validate_claims.py`**, which
 > re-derives it from the data with an explicit threshold and fails loudly if it
-> stops holding. Current state: 63 checks, 63 passing. Claims that are stated
+> stops holding. Current state: 66 checks, 66 passing. Claims that are stated
 > here but *not* covered by a check should be treated as unverified.
 
 > **A Pareto-dominance claim made elsewhere in this repository was
@@ -64,6 +64,23 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > precision bar is reached at 244 pages, 300 pages name the same ceiling rung as
 > the full 1200 on 93% of draws, and 100 pages on 47%. See `ANGLES.md`
 > §0-procedure, check R11, Algorithm 3 in the paper.
+
+> **A signal that costs nothing matches the probe, and dataset identity bounds
+> both.** Routing on raw image size clears the randomisation hull at every
+> operating point of both costings (+0.002 to +0.061) and stays within 0.010 of
+> the probe at every preference. Randomising with the probe's mid-prefill abort
+> clears nothing, so the probe's margin is its signal and not its read cost. A
+> policy given only the dataset label, escalating at random within each, reaches
+> +0.051 to +0.080 and dominates everything. See `ANGLES.md` §0-free, checks
+> CV2 and CV3.
+
+> **Pixels buy accuracy on this corpus; visual tokens do not.** With the input
+> pinned at full resolution, tripling InternVL3-1B's token budget gives +0.024
+> [-0.006, +0.054] and spending a further 2258 tokens costs 0.046 where they are
+> actually spent. With the token budget held still instead, one pixel rung buys
+> +0.108. The pages where the tile bound changed no tokens give exactly +0.000
+> [+0.000, +0.000] over 260 pages, which doubles as a determinism check. See
+> `ANGLES.md` §0-tokens, check R13.
 
 > **A flat per-configuration latency under-charges escalation by 16%.** The
 > profiling image did not actually escalate. Per-example costing shrinks the

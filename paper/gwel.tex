@@ -39,42 +39,38 @@ Pre-Generation Escalation Decisions in Sub-Billion VLMs}\vspace{-0.5em}}
 
 \begin{abstract}
 Vision--language cascades answer from a downsampled image and escalate to full
-resolution when the model appears uncertain. Published escalation policies learn
-this decision by reinforcement learning on 7B-class models and read it from the
-output distribution after generation. We ask what a 500M-parameter model already
-knows before it writes a token, and the answer did not survive our own audits
-intact.
+resolution when the model appears uncertain. Published escalation policies
+learn this decision by reinforcement learning on 7B-class models and read it
+from the output distribution after generation. We ask what a 500M model can
+supply before it writes a token, and evaluate every candidate against the
+baseline the literature omits: randomising between fixed configurations, which
+needs no signal and traces a convex hull that any adaptive policy must clear.
 
-A linear probe on pre-generation activations appears to predict escalation
-value better than output entropy ($0.760$ against $0.617$). Audited, most of
-that advantage is a domain effect: free image size reaches $0.748$ on the same
-mixture; inside a single dataset the probe plateaus at $0.572$ against entropy's
-$0.663$ given nine times the training data, at every depth, for four probe
-families; and where the two signals disagree, the disagreement predicts the
-source dataset at $0.738$. The headline ranking gain is nominally significant
-and does not survive correction across the fourteen paired comparisons this
-paper reports.
+Three results follow. Output entropy, the standard baseline, never clears that
+hull on a four-dataset mixture, because reading it requires completing the pass
+it prices. A linear probe on pre-generation activations does clear it, but so
+does the image's own pixel dimensions, read from the file header for nothing
+and within $0.010$ of the probe at every operator preference; and a policy
+given only the dataset label, escalating at random within each dataset,
+dominates both. The probe's apparent ranking advantage ($0.760$ against
+$0.617$) is a between-domain effect: image size alone reaches $0.748$, inside
+one dataset the probe plateaus at $0.572$ against entropy's $0.663$ given nine
+times the data, and the claim does not survive correction across the fourteen
+paired comparisons reported here.
 
-What survives is a decision question and a cost question. Randomising between
-fixed configurations traces a convex hull that any adaptive policy must clear.
-The standard entropy threshold never clears it on our mixture, because its read
-requires the pass it prices. A cost-derived rule (escalate where the calibrated
-expected gain exceeds the measured marginal latency over the operator's stated
-value of a correct answer) clears the hull by up to $+0.054$ when its signal is
-read mid-prefill, and, extended to a resolution ladder, by $+0.006$ to $+0.042$
-on homogeneous document traffic. On $1200$ document pages, $93\%$ of what
+What survives is graded action and measured cost. Thresholding the calibrated
+expected gain at the measured marginal latency, over the operator's stated
+value of a correct answer, removes the escalation rate as a tunable; extended
+to a resolution ladder it clears the hull by $+0.006$ to $+0.042$ on
+homogeneous document traffic. On $1200$ document pages, $93\%$ of what
 escalation repairs is repaired below the top rung, and accuracy saturates at a
-pixel resolution that four models agree on, spanning $8.6\times$ parameters,
-two lineages and three ways of turning pixels into tokens: a property of the
-corpus, measurable once. A fifth model, whose token budget does not grow with
-resolution, stops a rung earlier: the corpus ceiling is an upper bound on what
-a model needs rather than a constant, and it bounds how much of that ceiling is
-the pixels and how much the sequence length.
-
-Sixty-three claims, including every negative result and the limits of the
-positive ones, are re-derived from the run records by a harness that fails
-loudly when any stops holding, with paired comparisons corrected for
-family-wise error.
+pixel resolution shared by four models spanning $8.6\times$ parameters, two
+lineages and three tokenisers. A fifth model, whose tile grid can be moved
+independently of its input, makes that ceiling an upper bound rather than a
+constant and separates the two quantities the others confound: one pixel rung
+at a fixed token budget buys $+0.108$, while tripling the token budget at fixed
+pixels buys $+0.024\ [-0.006, +0.054]$ and spending beyond that is harmful. We
+state the procedure that locates the ceiling and the sample size it requires.
 \end{abstract}
 
 \section{Introduction}
@@ -101,12 +97,12 @@ because it fits in a gigabyte of GPU memory~\cite{smolvlm}. Our question is
 therefore narrow: \emph{what does a 500M VLM already know about its own need
 for more pixels, and how cheaply can that be read?}
 
-Fig.~\ref{fig:method} is where we end up: a single cheap pass, a score, and a
-choice among resolution rungs priced by measured latency. The short answer
-changed while we were writing it. On a benchmark mixture the
-model appears to know more than its output reveals; on a single workload most of
-that apparent knowledge turns out to be a recognition of which benchmark the
-query came from. What survives is narrower and, we think, more useful: reading
+Fig.~\ref{fig:method} summarises the serving path: a single cheap pass, a
+score, and a choice among resolution rungs priced by measured latency. The
+answer depends on the evaluation distribution. On a benchmark mixture the model
+appears to know more than its output reveals; inside a single workload most of
+that apparent knowledge is a recognition of which benchmark the query came
+from. What survives is narrower and, we think, more useful: reading
 the right quantity matters more than reading it well, deciding \emph{how far} to
 escalate matters more than deciding \emph{whether}, and what the model knows is
 whether to look again rather than where.
@@ -149,24 +145,30 @@ latencies rather than a tuned rate (Algorithm~2).}
 
 \paragraph{Contributions.}
 \begin{enumerate}\itemsep2pt
-  \item \textbf{An audit that overturns our own headline.} Pricing escalation
-  per example reveals the probe escalating $1.19\text{--}1.33\times$ larger
-  images than entropy; following that thread, free image size scores $0.748$
-  against the probe's $0.761$, and inside a single dataset the probe reaches
-  $0.572$ where output entropy, fitted on nothing, reaches $0.663$, at any depth
-  and with any of four probe families. The probe's ranking advantage is a
-  between-domain effect, and it does not survive family-wise correction
-  (\S\ref{sec:confound}, \S\ref{sec:singledomain}).
-  \item \textbf{A no-signal baseline that most routing fails.} Randomising
-  between fixed configurations reaches every point on their convex hull with no
-  signal at all, and this is the comparison the escalation literature does not
-  make. The standard entropy threshold never clears that hull on our mixture,
-  because its read requires the pass it prices; the probe clears it by
-  $+0.008$ to $+0.054$, an advantage owed to its mid-prefill abort rather than
-  to its ranking; and the resolution ladder clears it on homogeneous traffic
-  where binary escalation does not (\S\ref{sec:policy}, \S\ref{sec:ladder}).
-  \item \textbf{A cost-derived decision rule, and the cascade assumption it
-  corrects.} Calibrating the expected signed gain and thresholding at the
+  \item \textbf{An evaluation protocol for allocation signals, and the failure
+  it detects.} Pooling examples across benchmarks that differ in how much
+  resolution buys inflates any signal correlated with benchmark identity.
+  Applied to a pre-generation probe, per-example cost accounting exposes it
+  escalating $1.19\text{--}1.33\times$ larger images than entropy; scored
+  inside a single dataset it reaches $0.572$ where output entropy, fitted on
+  nothing, reaches $0.663$, at every depth and for four probe families; and the
+  disagreement between the two signals predicts the source dataset at $0.738$.
+  The ranking advantage is a between-domain effect and does not survive
+  family-wise correction (\S\ref{sec:confound}, \S\ref{sec:singledomain}).
+  \item \textbf{Two baselines that most routing fails, one of which costs
+  nothing.} Randomising between fixed configurations reaches every point on
+  their convex hull with no signal at all, and the escalation literature does
+  not make that comparison. The standard entropy threshold never clears the
+  hull on our mixture, because its read requires the pass it prices. Raw image
+  size, read from the file header, clears it at every operating point of either
+  costing and is within $0.010$ of the probe at every operator preference, so
+  the pre-generation read buys nothing here that the file header does not
+  already give. Randomising with the probe's mid-prefill abort clears nothing,
+  which places the probe's margin in its signal rather than in its read cost.
+  The resolution ladder clears the hull on homogeneous traffic where binary
+  escalation does not (\S\ref{sec:policy}, \S\ref{sec:ladder}).
+  \item \textbf{A decision rule derived from measured cost, and the cascade
+  assumption it corrects.} Calibrating the expected signed gain and thresholding at the
   cost-implied break-even removes the rate parameter. Calibrating the weak
   model's error probability instead, the standard cascade recipe, coincides with
   our rule exactly when escalation cannot make things worse, and spends $59\%$
@@ -221,9 +223,10 @@ pass. We differ on each count, and \S\ref{sec:policy} measures what the first
 of those choices is worth by implementing their mechanism without its training.
 
 \paragraph{Visual token compression.} A parallel line reduces cost by discarding
-tokens after the vision encoder has run: FastV and SparseVLM prune on attention
-scores, and GlimpsePrune~\cite{glimpseprune} learns a data-driven pruning metric
-from a single-pass ``glimpse'', removing $92.6\%$ of visual tokens at parity.
+tokens after the vision encoder has run, typically ranking them by attention
+score. GlimpsePrune~\cite{glimpseprune} is the variant we compare against in
+detail: it learns a data-driven pruning metric from a single-pass ``glimpse''
+and removes $92.6\%$ of visual tokens at parity.
 These methods and ours act on different halves of the same cost, which
 \S\ref{sec:cost} quantifies: post-encoder pruning cannot recover the encoder's
 share, and on the three models we measure that share is $43\text{--}50\%$.
@@ -260,11 +263,14 @@ AwaRes~\cite{awares} & policy output & during & SFT+GRPO \\
 GlimpsePrune~\cite{glimpseprune} & glimpse token & $\tfrac{2}{3}L$ & a head \\
 \midrule
 entropy baseline & output scores & after & n/a \\
+image size & file header & before & n/a \\
 \textbf{ours} & residual stream & layer $\ell$ & n/a \\
 \bottomrule
 \end{tabular}
 \caption{What each method reads and what it costs to train. ``During'' means the
-decision is a generated token, available only once decoding starts. The three
+decision is a generated token, available only once decoding starts; ``before''
+means the decision needs no forward pass at all, which is the baseline
+\S\ref{sec:policy} finds hardest to beat. The three
 trained policies also need a supervisor: an LLM judge, GPT-4o, and a
 LLaMA-3.3-70B judge with an oracle grounding model respectively. GlimpsePrune
 prunes tokens rather than choosing resolution, and is listed because it is the
@@ -626,11 +632,16 @@ output entropy & $0.735$ & $\mathbf{0.656}$ \\
 \caption{AUROC on the joint escalation target, $20$ resampled folds, layer 6.
 Random Fourier features give a smooth non-linear boundary without a bespoke
 architecture; the shrunk centroid is the covariance correction the plain
-difference of means omits.}
+difference of means omits. The within-DocVQA column is fitted on the
+$1200$-page pilot at its full training size; the learning curve of
+Fig.~\ref{fig:curve} reports $0.572$ for the same probe at $900$ training
+examples over $30$ resamples, and Table~\ref{tab:confound}'s $0.519$ is the
+different quantity of fitting inside each of the four mixture datasets on $210$
+examples apiece.}
 \label{tab:family}
 \end{table}
 
-Two things follow, and both are load-bearing. On the mixture the two-centroid
+Two consequences, both load-bearing. On the mixture the two-centroid
 difference \emph{beats} every fitted alternative by $0.048$ or more, so the
 paper's probe is not an undertrained stand-in for something better; fitting
 parameters on $700$ examples in $960$ dimensions costs more than it recovers.
@@ -670,9 +681,11 @@ indistinguishable.
 \addlegendentry{output entropy}
 \end{axis}
 \end{tikzpicture}
-\caption{Probe AUROC on $Q_2$ against depth. The ceiling is reached by layer 3
-and never improves, so the escalation decision can be made after one sixth of
-the language model.}
+\caption{Probe AUROC on $Q_2$ against depth, single fit per depth on the
+reported fold; the $0.760$ quoted in the text is the bootstrapped estimate at
+layer 6 over the same fold, which the coarse sweep here renders as $0.750$. The
+ceiling is reached by layer 3 and never improves, so the escalation decision
+can be made after one sixth of the language model.}
 \label{fig:layers}
 \end{figure}
 
@@ -831,13 +844,15 @@ marginally above it; resampled, the best entropy operating point is
 indistinguishable from the chord and every other sits below it
 (Table~\ref{tab:convexity}). Four probe points lie on the Pareto front,
 together with the two fixed policies at its ends. Fig.~\ref{fig:resplit} tests
-how much of this survives resplitting.}
+how much of this survives resplitting, and Table~\ref{tab:freesignal} adds the
+two comparators that supersede this comparison: a free image descriptor and a
+policy that aborts at random.}
 \label{fig:frontier}
 \end{figure}
 
 \paragraph{How much of that is the fold?} Universal dominance is a statement
-about six points on $200$ test examples, and this project has been burned once
-already by a conclusion drawn at that scale. We therefore refit everything
+about six points on $200$ test examples, which is not a scale at which a
+categorical claim should be made. We therefore refit everything
 downstream of the split (probe direction, thresholds, calibration) on $200$
 stratified resplits.
 
@@ -898,7 +913,11 @@ ladder, DocVQA & $+0.042$ & $+0.029$ & $+0.017$ & $+0.006$ \\
 \caption{Accuracy above what randomising between fixed configurations reaches
 at the same expected latency, $30$ resampled folds; every probe and ladder
 interval excludes zero and every entropy interval excludes any gain above
-$+0.005$.}
+$+0.005$. Prices here are per configuration;
+Table~\ref{tab:freesignal} repeats the mixture rows under the per-example
+prices of \S\ref{sec:confound}, where the probe's margin narrows from
+$+0.053$ to $+0.033$ at $V{=}400$ and the ranking of the policies is
+unchanged.}
 \label{tab:convexity}
 \end{table}
 
@@ -914,14 +933,124 @@ rates ($+0.006$ to $+0.056$).
 Three readings, each load-bearing. The entropy threshold, the baseline this
 literature measures against, does not clear the hull here at any operating
 point of either parameterisation: reading it requires completing the pass it
-prices, and the read cost eats the routing gain. The
-probe clears the hull everywhere, by most at tight budgets, and
-\S\ref{sec:confound} shows its ranking is largely a domain effect, so the
-margin is owed to the mid-prefill abort rather than to what the direction
-knows. And on the homogeneous pilot the ladder clears the hull where binary
+prices, and the read cost eats the routing gain. The probe clears it at every
+tight and moderate budget, by most where the budget binds, and only at the
+loosest preference under per-example prices does its interval span zero
+($-0.001\ [-0.004, +0.002]$ at $V{=}3200$). Table~\ref{tab:freesignal} locates
+that margin: not in the mid-prefill abort, since randomising with the same
+abort clears nothing, but in the signal, which \S\ref{sec:confound} shows is
+largely a domain effect and which a free image descriptor supplies as well. And on the homogeneous pilot the ladder clears the hull where binary
 escalation does not (\S\ref{sec:ladder}): the graded action space, not the
 signal, beats the coin flip there. Adaptive escalation pays where its read is
 cheap or its actions are graded, and not otherwise.
+
+
+\paragraph{Two comparators that are cheaper still.} A hull comparison answers
+whether a signal beats no signal. It does not answer which part of an adaptive
+policy is doing the work, and two candidates cost less than the probe.
+
+The first is the free one. \S\ref{sec:confound} finds raw image size scoring
+$0.748$ against the probe's $0.761$, and a signal read from the file header
+does not merely rank almost as well: it prices differently. A policy reading it
+decides before anything runs, so an escalated query never pays for a cheap pass
+it discards, and its cost structure is exactly that of the randomisation it is
+being compared against. The second isolates the mechanism rather than the
+signal: escalate on a coin flip, but abandon the cheap pass mid-prefill as the
+probe does. If the probe's margin is owed to the abort, this should reproduce
+it (Table~\ref{tab:freesignal}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lcccc}
+\toprule
+gap to the hull & $V{=}400$ & $800$ & $1600$ & $3200$ \\
+\midrule
+\multicolumn{5}{l}{\emph{per-configuration prices}} \\
+probe & $+0.053$ & $+0.050$ & $+0.033$ & $+0.001$ \\
+image size (free) & $\mathbf{+0.061}$ & $+0.050$ & $+0.024$ & $+0.009$ \\
+entropy & $-0.001$ & $-0.012$ & $-0.028$ & $-0.022$ \\
+random $+$ abort & $-0.000$ & $-0.007$ & $-0.001$ & $-0.001$ \\
+\midrule
+\multicolumn{5}{l}{\emph{per-example prices}} \\
+probe & $+0.033$ & $+0.032$ & $+0.021$ & $-0.001$ \\
+image size (free) & $\mathbf{+0.034}$ & $+0.027$ & $+0.011$ & $+0.002$ \\
+entropy & $-0.001$ & $-0.002$ & $-0.014$ & $-0.017$ \\
+random $+$ abort & $-0.000$ & $-0.006$ & $-0.001$ & $-0.001$ \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy above the randomisation hull at matched expected latency,
+$30$ resampled folds, under both costings. Every image-size interval excludes
+zero; no random-plus-abort interval does. The probe rows are recomputed on
+resamples independent of those behind Table~\ref{tab:convexity} and agree with
+it to within $0.007$.}
+\label{tab:freesignal}
+\end{table}
+
+Both answers are inconvenient for the apparatus this paper built. \textbf{A
+signal costing nothing to read clears the hull at every operating point of
+either costing}, and paired against the probe over the same resamples it wins
+at two of four preferences under flat prices ($+0.009\ [+0.005, +0.012]$ at
+$V{=}400$), loses at two under per-example prices ($-0.010\ [-0.016, -0.004]$
+at $V{=}1600$), and never differs by more than $0.010$ either way. On this
+mixture the pre-generation probe buys nothing that the image dimensions do not
+already supply.
+
+\textbf{And the abort mechanism, alone, buys nothing at all.} Random escalation
+with the same mid-prefill abandonment sits at or below the hull everywhere,
+from $-0.000$ to $-0.007$ swept by preference and to $-0.022$ swept by rate.
+The margin the probe opens is therefore bought by its signal and not by its
+read cost, which corrects an attribution an earlier version of this section
+made in the opposite direction. What the signal knows, given
+\S\ref{sec:confound}, is which dataset the query came from, and image size
+knows the same thing for free.
+
+
+\paragraph{And an upper bound on what the confound can be worth.} If the
+signals above are reading dataset identity, the natural ceiling is a policy
+handed that identity outright. We give one the label and let it pick a rate per
+dataset, escalating a uniformly random subset inside each. Selection within a
+dataset stays random by construction, so the policy knows \emph{which
+benchmark} and nothing whatever about the query (Table~\ref{tab:domainceiling}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+gap to the hull & $V{=}400$ & $800$ & $1600$ & $3200$ \\
+\midrule
+domain label, tuned rate & $\mathbf{+0.080}$ & $\mathbf{+0.075}$ & $\mathbf{+0.060}$ & $\mathbf{+0.051}$ \\
+probe & $+0.058$ & $+0.056$ & $+0.034$ & $+0.005$ \\
+per-domain entropy rule & $+0.012$ & $+0.020$ & $-0.022$ & $-0.014$ \\
+\bottomrule
+\end{tabular}}
+\caption{What dataset identity alone buys, $30$ resampled folds. The first row
+escalates a random subset within each dataset at a rate tuned per dataset on
+the test fold, so it is an optimistic bound rather than a deployable policy.
+The probe row is recomputed on these resamples and agrees with
+Table~\ref{tab:freesignal} to within $0.005$.}
+\label{tab:domainceiling}
+\end{table}
+
+The bound dominates every signal in this paper at every preference, while using
+no information about any individual query. What it does with the label is
+blunt, and that is the point: unable to choose \emph{which} queries, it
+escalates almost the whole of the domain where escalation pays and almost none
+of the domain where it does not, $100\%$ of DocVQA against $13\%$ of VQAv2
+averaged over preferences, with V*Bench and TextVQA between them. \textbf{On a
+benchmark mixture, essentially all of the adaptive gain available is the gain
+from knowing which benchmark you are serving}, and a router that already knows
+its traffic composition has it for free. That is the sharpest statement of the
+confound: not merely that the probe correlates with domain, but that domain is
+the whole of what any of these signals is worth here.
+
+The last row is the complement. Applying one unchanged preference inside each
+dataset, on output entropy, clears the hull at tight budgets and falls below it
+at loose ones. Within a domain, once identity is removed, what remains for a
+per-query signal to earn is small and inconsistently signed, which is
+\S\ref{sec:singledomain} restated in policy terms rather than in AUROC.
 
 \paragraph{A better ranking, again, and again no better policy.} Since our own
 numbers say the ceiling is the signal, we tried to improve the signal. Entropy
@@ -1005,7 +1134,10 @@ pre-generation probe & $\mathbf{0.761}$ & $0.519$ \\
 \end{tabular}
 \caption{Predicting the joint escalation gain. Pooled is the held-out fold of
 the four-dataset mixture, $n=200$. Within-dataset trains and tests the probe
-inside a single dataset over $40$ resamples, weighted by dataset size.}
+inside a single dataset over $40$ resamples, weighted by dataset size, so each
+fit sees about $210$ examples; the single-domain pilot of
+\S\ref{sec:singledomain} repeats the measurement with nine times the data and
+reports $0.572$ for the probe against $0.663$ for entropy.}
 \label{tab:confound}
 \end{table}
 
@@ -1175,8 +1307,7 @@ AUROC & $0.531$ & $0.546$ & $0.572$ & $0.579$ & $0.618$ & $\mathbf{0.625}$ \\
 Eq.~\ref{eq:probecost} gives $20.0$\,ms at $\ell=6$ and $59.1$\,ms at
 $\ell=32$, so the saving per escalated query falls from $106.9$ to $67.8$\,ms.
 
-Two things are worth noting about that residual $67.8$\,ms. It is exactly the
-decode time, because a full-prefill probe still skips generation, and it is the
+That residual $67.8$\,ms is exactly the decode time, because a full-prefill probe still skips generation, and it is the
 same floor the cache analysis of \S\ref{sec:cost} arrived at from an unrelated
 direction. The probe's advantage narrows to one mechanism, stated twice: reading
 the model without making it speak.
@@ -1191,11 +1322,12 @@ signals for different purposes land on the same region of the network, which is
 weak evidence but it points the same way as \S\ref{sec:singledomain}: the
 shallow saturation was the artefact, not the deep one.
 
-\paragraph{What survives.} Three things. The mixture result is real and
-mixtures are real deployments: a router serving documents and photographs
+\paragraph{What survives.} The mixture result is real, and mixtures are real
+deployments: a router serving documents and photographs
 through one endpoint faces exactly the pooled distribution, and there a free
-image-size feature is nearly as good and much cheaper than either signal we
-studied. The negative results are untouched, since none of them rests on the
+image-size feature is not merely nearly as good but, built into a policy and
+priced, indistinguishable from the probe within $0.010$ at every preference
+(Table~\ref{tab:freesignal}). The negative results are untouched, since none of them rests on the
 probe working. And the paper's thesis survives inverted: we set out to show that
 a better signal is not a better router, and the sharpest instance turns out to
 be our own signal, whose advantage was an artefact of the evaluation mixture.
@@ -1330,7 +1462,7 @@ property gives $\mathbb{E}[\Delta J \mid s] = -w_e\,\mathbb{E}[G \mid s] +
 t / w_e$. Monotone $\hat g$ makes the sublevel set an interval in $s$. $\square$
 
 \vspace{2pt}
-Two things follow. Isotonic regression returns a non-decreasing $\hat g$ by
+Isotonic regression returns a non-decreasing $\hat g$ by
 construction, so Algorithm~1 realises $\pi^\star$ whenever the calibration is
 accurate, which Fig.~\ref{fig:reliability} measures rather than assumes. And the
 relation to Kotte's Theorem~1~\cite{ucci} is exact: under their assumption that
@@ -1747,8 +1879,8 @@ answering $14$ points more of the corpus correctly than any model in the
 family, and while being handed $3.2\times$ the visual tokens to do it with
 ($1312$ at the ceiling, $4161$ at full resolution) for a measured
 $+0.002\ [-0.016, +0.020]$. Whatever is left unanswered at $1152$\,px on these
-pages is not waiting on resolution for any of the four models, and the one
-explanation that survives is the one about the paper, not the network.
+pages is not waiting on resolution for any of the four models, which points at
+the documents rather than at the models reading them.
 
 \begin{figure}[t]
 \centering
@@ -1845,14 +1977,67 @@ the weaker of the two, because InternVL is not the weaker model. It peaks at
 $0.806$ against SmolVLM-500M's $0.748$, so a model that reads \emph{more} of
 this corpus overall is the one that stops gaining from pixels first.
 
+
+\paragraph{The other axis, with the pixels held still.} The control above moves
+pixels and holds tokens; the pair is only complete with its converse. InternVL
+selects its tile grid under a bound, so raising the bound multiplies the visual
+tokens spent on an image whose pixels never change. Pinning the input at full
+resolution and sweeping the bound over $500$ pages measures what sequence
+length alone buys here (Table~\ref{tab:tilebudget}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{3.5pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lccc}
+\toprule
+step & pages & extra tokens & net gain [95\% CI] \\
+\midrule
+$1280 \to 3328$ tokens & $500$ & $+2011$ & $+0.024\ [-0.006, +0.054]$ \\
+\midrule
+\multicolumn{4}{l}{\emph{next bound, split by what it actually spent}} \\
+tokens rose & $240$ & $+2258$ & $\mathbf{-0.046\ [-0.087, -0.008]}$ \\
+tokens unchanged & $260$ & $0$ & $+0.000\ [+0.000, +0.000]$ \\
+\bottomrule
+\end{tabular}}
+\caption{InternVL3-1B on $500$ DocVQA pages with the input pinned at full
+resolution and only the tile bound moving. Accuracy is $0.782$, $0.806$,
+$0.784$ by bound. The second bound raises the token count on $48\%$ of pages
+and leaves the rest untouched, so the step is reported conditioned on what was
+spent rather than on the bound's name.}
+\label{tab:tilebudget}
+\end{table}
+
+Three things follow, and the last one is the point. Tripling the token budget
+at fixed pixels buys $+0.024\ [-0.006, +0.054]$, a null tight enough to have
+found an effect a third the size of the pixel gains we do detect. Spending a
+further $2258$ tokens \emph{costs} $0.046$ accuracy where it is actually spent,
+which is consistent with the premise of the token-pruning
+literature~\cite{glimpseprune} that most visual tokens are redundant, and with
+the mechanism being interpolation rather than information: the extra tiles come
+from upscaling the same source pixels further. And the pages where the bound
+changed nothing form an internal control that behaves exactly as greedy
+decoding requires, $+0.000\ [+0.000, +0.000]$ over $260$ pages, which is what
+licenses reading the other subset at all.
+
+\textbf{Read against the fixed-budget ladder, this separates the two
+quantities.} Holding tokens still and raising pixels from $384$ to $768$ buys
+$+0.108$; holding pixels still and tripling tokens buys $+0.024$ with an
+interval spanning zero, and spending more than that is harmful. On this corpus
+the binding constraint is the information in the pixels, and sequence length is
+not scarce. That is the sentence an earlier draft asserted without evidence,
+then withdrew for want of it, and it is now supported by a pair of controls
+rather than by the co-varying ladders that cannot speak to it.
+
 \textbf{What we are entitled to say} is therefore narrower than what we first
-wrote, and more useful. No single token budget explains the ceiling, and pixel
-information alone is spent by $768$\,px; in the band between $768$ and
-$1152$\,px the two are entangled and this paper cannot separate their
-contributions. The serving consequence is untouched, because it never depended
-on the mechanism: on this corpus every model we tested stops paying by
-$1152$\,px, and Algorithm~3 finds that point without needing to know why it is
-there.
+wrote, and better supported. No single token budget explains the ceiling; pixel
+information alone is spent by $768$\,px on the model that lets us isolate it;
+and additional sequence length, isolated in turn, does not repay its cost on
+this corpus. What we cannot do is attribute the $768$ to $1152$\,px gains of
+the four co-varying models between the two axes, since both move at every rung
+there. The serving consequence is untouched either way, because it never
+depended on the mechanism: every model we tested stops paying by $1152$\,px,
+and Algorithm~3 finds that point without needing to know why it is there.
 
 \textbf{That makes the saturation point reusable, as a bound.} Across these
 four it survives a change of serving model, of vision encoder and of lineage,
@@ -1873,14 +2058,14 @@ noise, and we report it rather than claim a symmetry the data does not show.
 \paragraph{The procedure, and what it costs to run.} If the ceiling is the
 transferable object then it has to be findable on a corpus nobody has measured,
 so we state the procedure we followed rather than only its output
-(Algorithm~3). Two of its steps exist because we got them wrong first. Step~2
-measures the visual tokens each pixel target actually produces instead of
-trusting the target: four of this paper's errors came from a configuration name
-that did not determine a cost, and on our own pilot two nominally different
-rungs turned out to be the same configuration for $56\%$ of examples. Step~6
-refuses to declare a ceiling from a wide interval, which is the failure we
-walked into at $n=244$ on an earlier pass and again, mid-collection, on the
-out-of-lineage run.
+(Algorithm~3). Two of its steps encode failures this paper documents
+elsewhere. Step~2 measures the visual tokens each pixel target actually
+produces instead of trusting the target, because four measurement errors here
+arose from a configuration name that did not determine a cost, and on our own
+pilot two nominally different rungs were the same configuration for $56\%$ of
+examples. Step~6 refuses to declare a ceiling from a wide interval, the failure
+mode that produced a premature verdict at $n=244$ on an earlier pass and again
+at $n \approx 100$ mid-collection on the out-of-lineage run.
 
 \begin{figure}[t]
 \small
@@ -2067,8 +2252,12 @@ crop, best cell & $2\times2$ & $\mathbf{128}$ & $\mathbf{0.584}$ \\
 \bottomrule
 \end{tabular}
 \caption{Accuracy against visual tokens, $n=1000$, two ways of spending the same
-budget. Paired against the best resolution configuration, the best crop is
-$+0.035\ [0.008, 0.063]$ more accurate at $2.5\times$ fewer tokens.}
+budget. Token counts are medians: the $768$\,px and full configurations share
+one because the processor caps its target at the input's longest side, and they
+differ on the $44\%$ of images large enough for the cap not to bind
+(\S\ref{sec:ladder}). Paired against the best resolution configuration, the
+best crop is $+0.035\ [0.008, 0.063]$ more accurate at $2.5\times$ fewer
+tokens.}
 \label{tab:twoways}
 \end{table}
 
@@ -2117,6 +2306,92 @@ essentially not \emph{where} to spend it. This bounds what internal signals
 deliver at this scale, and suggests that the supervision machinery
 of~\cite{awares} is not overengineering.
 
+
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{What an evaluation has to include before a signal can be believed.}
+The measurements above converge on three requirements, each of which changed a
+conclusion here when applied. Score signals \emph{within} each distribution
+rather than across a mixture: pooling inflated our probe from a within-domain
+$0.572$ to a pooled $0.760$, and the inflation is the mixture's own
+heterogeneity. Charge every signal what it costs to read: entropy ranks
+respectably and still fails the no-signal baseline, because reading it requires
+finishing the pass it is meant to price. And compare against randomisation
+between fixed configurations, not against a single fixed endpoint, since the
+endpoints are the two least interesting points of a reachable segment. None of
+the three is expensive. Together they are the difference between the result we
+first believed and the one we can defend.
+
+\paragraph{What this means for the systems we compare against.} It bounds
+rather than refutes them. The trained policies of~\cite{visionthink,
+adaptvision, awares} operate at 7B, where the untrained self-report we can
+measure is worth little (Table~\ref{tab:baseline}) and where the training is
+presumably what closes that gap. Our finding is about what is available
+\emph{without} training below one billion parameters, and there the honest
+answer on mixed traffic is that the file header is competitive with the
+residual stream. That is a statement about the difficulty of the sub-1B regime,
+not about the value of learning the decision. It does suggest one cheap control
+for that literature: report the escalation policy's accuracy against a policy
+that knows only the benchmark identity, which on our mixture accounts for the
+whole of the adaptive gain.
+
+\paragraph{Where the remaining money is.} Not in deciding \emph{whether} to
+escalate on heterogeneous traffic, where a free descriptor suffices, and not in
+a third abstention action, which the calibrated rule already suppresses
+(\S\ref{sec:abstain}). It is in deciding \emph{how far}, which is worth $35$\,ms
+per query at no accuracy cost on document traffic, and in knowing where to
+stop, which is a property of the corpus rather than of the query and needs
+measuring once. The one place a per-query signal earns its keep in our data is
+where the traffic is homogeneous enough that domain identity carries no
+information, and there entropy, not the probe, is the signal that survives.
+
+\paragraph{Status of each claim.} Table~\ref{tab:status} separates what the
+evidence supports at three different strengths, since the paper's claims are
+not all of one kind.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{4.05cm}p{3.5cm}@{}}
+\toprule
+claim & status \\
+\midrule
+The rate parameter is removable given a stated $V$ (Prop.~1) &
+demonstrated analytically, and it is a transposition of~\cite{ucci} \\
+\addlinespace
+Entropy does not clear the randomisation hull &
+measured on one mixture, both costings, all operating points \\
+\addlinespace
+A free image descriptor matches the probe &
+measured on one mixture; untested on traffic where size and content decouple \\
+\addlinespace
+The probe's pooled advantage is a domain effect &
+measured three ways; the magnitude within a domain is uncertain \\
+\addlinespace
+Accuracy saturates by $1152$\,px &
+measured on one corpus and five models; the number is corpus-specific by construction \\
+\addlinespace
+Pixels bind and tokens do not &
+measured on the one model whose two axes move separately; not decomposed for the other four \\
+\addlinespace
+The ceiling bounds any model's need from above &
+observed on five models, one counterexample would refute it \\
+\addlinespace
+The ladder pays where rungs are distinct &
+measured on DocVQA; null on datasets without a top rung \\
+\addlinespace
+Escalation value is domain-determined &
+observed across four datasets, assumed to extend to unseen ones \\
+\bottomrule
+\end{tabular}
+\caption{Evidential status of the paper's claims. ``Measured'' means an
+interval was computed on held-out data; ``observed'' means the pattern is
+consistent across the runs we have without an interval that would detect its
+absence.}
+\label{tab:status}
+\end{table}
+
 \section{Limitations}
 
 Five serving models, one GPU, and two pilots: $1000$ examples across four
@@ -2132,12 +2407,12 @@ bounds every model's useful resolution from above and can be found once, not
 that $1152$\,px is that ceiling for corpora we did not measure, nor that a
 given model needs all of it. A benchmark of denser scans or smaller type should place it
 higher, and the procedure for finding it (Algorithm~3), not the number, is what
-transfers. The mechanism behind the ceiling is also only partly settled: we can
-rule out a fixed token budget and we can show pixel information alone is spent
-by $768$\,px, but the band between $768$ and $1152$\,px moves both quantities
-at once in every model whose tokeniser is resolution-sensitive, and separating
-their contributions there would need a model whose token budget can be dialled
-independently of its input size.
+transfers. The mechanism behind the ceiling is settled only on the model that lets both
+axes be moved separately. There, pixels at fixed tokens buy $+0.108$ over one
+rung and tokens at fixed pixels buy $+0.024$ with an interval spanning zero. We
+do not claim the same decomposition for the four models whose tokeniser follows
+resolution, because every rung of theirs moves both quantities, and a
+corpus with finer print could shift the balance.
 Our strongest baseline is
 the published escalation \emph{mechanism} without its training; a re-implemented
 VisionThink at sub-1B scale remains the comparison the field would want, and the
@@ -2204,7 +2479,7 @@ uncertain.
 
 Every numeric claim in this paper is re-derived from the run records by a
 validation harness with an explicit threshold per claim, which exits non-zero if
-any stops holding; it currently checks sixty-three, including the negative
+any stops holding; it currently checks sixty-six, including the negative
 results on localization, on our own energy instrument, and on the universality
 of Pareto dominance, that last one asserts the claim is \emph{not} universal,
 so restating it too strongly fails the build. Claims stated in the text and
@@ -2236,8 +2511,9 @@ about six GPU-hours, which is the point of working at this scale.
 \section{Conclusion}
 
 We set out to ask what a 500M vision--language model knows about its own need
-for more pixels before it generates anything. The answer we can defend is
-narrower than the one we expected, and arriving at it was the useful part.
+for more pixels before it generates anything. Measured against baselines that
+need no model at all, the defensible answer is narrow, and the baselines are
+the reason it is worth stating.
 
 On a four-dataset mixture, a linear probe on pre-generation activations ranks
 escalation value better than output confidence and yields a policy readable
@@ -2247,11 +2523,18 @@ training data narrows that gap without closing it. What the direction mostly
 encodes is which \emph{kind} of image is present: a quantity that predicts
 escalation value across a benchmark mixture, because the mixture's datasets
 differ enormously in how much resolution buys, and predicts much less within
-one. Raw image size, free to read, captures almost all of it.
+one. Raw image size, free to read, carries the same information: built into a
+policy and priced, it clears the randomisation hull at every operating point of
+either costing and stays within $0.010$ of the probe at every operator
+preference. A policy handed the dataset label and escalating at random within
+each dataset dominates both, which places an upper bound on the whole exercise:
+on mixed traffic, the adaptive gain available is the gain from knowing which
+benchmark is being served.
 
-Two things bound the claim rather than one. This is a way of deciding
-\emph{whether} to look again and not \emph{where}, and on the evidence here it
-is a way of deciding for a heterogeneous mixture and not for a workload.
+Three things bound the claim rather than one. This is a way of deciding
+\emph{whether} to look again and not \emph{where}; on the evidence here it is a
+way of deciding for a heterogeneous mixture and not for a workload; and on a
+mixture it is not a way that needs the model's activations.
 
 What we would keep is the part that did not depend on the probe. The decision
 rule is signal-agnostic and survives on output confidence, where one stated
@@ -2339,8 +2622,8 @@ reference frontier.}
 \label{tab:ablation}
 \end{table}
 
-Three things. The losses are real but wildly unequal, so the table is a ranking
-of what matters rather than a list of things that help. \textbf{At $400$\,ms the
+The losses are real but wildly unequal, so the table ranks what matters rather
+than listing what helps. \textbf{At $400$\,ms the
 ladder is what makes the budget usable at all}: binary escalation reaches
 $0.281$, which is always-cheap to within $0.003$, because no binary policy can
 afford the top rung inside that budget. And per-example pricing costs $-0.003\
@@ -2519,25 +2802,27 @@ on the cost-derived rule when a preference can be stated.
 
 
 \begin{thebibliography}{9}\small
-\bibitem{visionthink} S.~Yang et al. VisionThink: Smart and Efficient Vision Language Model via Reinforcement Learning. arXiv:2507.13348, 2025.
-\bibitem{adaptvision} Z.~Lin et al. AdaptVision: Efficient Vision-Language Models via Adaptive Visual Acquisition. arXiv:2512.03794, 2026.
-\bibitem{awares} N.~Shabtay et al. Look Where It Matters: High-Resolution Crops Retrieval for Efficient VLMs. arXiv:2603.16932, 2026.
-\bibitem{glimpseprune} Q.-S.~Zeng et al. A Glimpse to Compress: Dynamic Visual Token Pruning for Large Vision-Language Models. arXiv:2508.01548, 2025.
-\bibitem{lugoloobi} W.~Lugoloobi et al. LLMs Encode Their Failures: Predicting Success from Pre-Generation Activations. arXiv:2602.09924, 2026.
-\bibitem{cencerrado} I.~V.~Moreno Cencerrado et al. No Answer Needed: Predicting LLM Answer Accuracy from Question-Only Linear Probes. arXiv:2509.10625, 2026.
-\bibitem{llmrouter} T.~Varshney et al. LLM Router: Rethinking Routing with Prefill Activations. arXiv:2603.20895, 2026.
-\bibitem{energy} J.~Zhan et al. Seeing is Free, Speaking is Not: Uncovering the True Energy Bottleneck in Edge VLM Inference. ACM MM, 2026.
-\bibitem{smolvlm} A.~Marafioti et al. SmolVLM: Redefining small and efficient multimodal models. arXiv:2504.05299, 2025.
-\bibitem{quantization} H.~Shin et al. Rethinking Small VLM Quantization: From Component-Wise Analysis to Hardware-Aware Edge Deployment. ICML Workshop, 2026.
+\bibitem{visionthink} S.~Yang, J.~Li, X.~Lai, B.~Yu, H.~Zhao and J.~Jia. VisionThink: Smart and Efficient Vision Language Model via Reinforcement Learning. arXiv:2507.13348, 2025.
+\bibitem{adaptvision} Z.~Lin, Y.~Liu, Y.~Yang, L.~Tao and D.~Ye. AdaptVision: Efficient Vision-Language Models via Adaptive Visual Acquisition. arXiv:2512.03794v3, 2026.
+\bibitem{awares} N.~Shabtay, M.~Kimhi, A.~Spector, S.~Haray, E.~Rivlin, C.~Baskin, R.~Giryes and E.~Schwartz. Look Where It Matters: High-Resolution Crops Retrieval for Efficient VLMs. arXiv:2603.16932, 2026.
+\bibitem{glimpseprune} Q.-S.~Zeng, Y.~Li, Q.~Wang, P.-T.~Jiang, Z.~Wu, M.-M.~Cheng and Q.~Hou. A Glimpse to Compress: Dynamic Visual Token Pruning for Large Vision-Language Models. arXiv:2508.01548, 2025.
+\bibitem{lugoloobi} W.~Lugoloobi, T.~Foster, W.~Bankes and C.~Russell. LLMs Encode Their Failures: Predicting Success from Pre-Generation Activations. ICLR 2026 LIT Workshop; arXiv:2602.09924v3, 2026.
+\bibitem{cencerrado} I.~V.~Moreno Cencerrado, A.~Gonzalvez Hawthorne et al. No Answer Needed: Predicting LLM Answer Accuracy from Question-Only Linear Probes. ICLR 2026 Workshop on Principled Design for Trustworthy AI; arXiv:2509.10625v3, 2026.
+\bibitem{llmrouter} T.~Varshney, A.~Surla, M.~Xu, G.~V.~Krishnan, M.~Jeblick, D.~Austin, N.~Vaidya and D.~Onofrio (NVIDIA). LLM Router: Rethinking Routing with Prefill Activations. arXiv:2603.20895v2, 2026.
+% Venue read from the authors' submission note, not from the PDF's first page: verify before camera-ready.
+\bibitem{energy} J.~Zhan, H.~Shen and M.~Guo et al. Seeing is Free, Speaking is Not: Uncovering the True Energy Bottleneck in Edge VLM Inference. arXiv:2607.09520, 2026.
+\bibitem{smolvlm} A.~Marafioti, O.~Zohar, M.~Farr\'e, M.~Noyan, E.~Bakouch et al. (Hugging Face). SmolVLM: Redefining small and efficient multimodal models. arXiv:2504.05299, 2025.
+% Workshop venue not stated on the PDF's first page: verify before camera-ready.
+\bibitem{quantization} H.~Shin, C.~Kim, R.~Kim, H.~Yoo and J.~Kim. Rethinking Small VLM Quantization: From Component-Wise Analysis to Hardware-Aware Edge Deployment. arXiv:2607.08029, 2026.
 \bibitem{ucci} V.~Kotte. UCCI: Calibrated Uncertainty for Cost-Optimal LLM Cascade Routing. arXiv:2605.18796, 2026.
-\bibitem{recall} Ruan et al. Doomed from the Start: Early Abort of LLM Agent Episodes via a Recall-Controlled Probe Cascade. arXiv:2607.06503, 2026.
-\bibitem{conformal} K.~Tayebati et al. Learning Conformal Abstention Policies for Adaptive Risk Management in Large Language and Vision-Language Models. arXiv:2502.06884, 2025.
-\bibitem{clusterroute} Moslem et al. Cluster, Route, Escalate: Cascaded Framework for Cost-Aware LLM Serving. arXiv:2606.27457, 2026.
-\bibitem{deferral} Liu et al. Forced Deferral: Manipulating Routing Decisions in Multimodal LLM Cascades. arXiv:2606.15308, 2026.
-\bibitem{cascadefail} Sun et al. When Efficiency Backfires: Cascading LLMs Trigger Cascade Failure under Adversarial Attack. arXiv:2605.17288, 2026.
-\bibitem{vlcache} Y.~Wang et al. VLCache: Computing 2\% Vision Tokens and Reusing 98\% for Vision-Language Inference. arXiv:2512.12977, 2026.
-\bibitem{abstention} Knowing When Not to Answer: Evaluating Abstention in Multimodal Reasoning Systems. arXiv:2604.14799, 2026.
-\bibitem{recoverr} Srinivasan et al. Selective ``Selective Prediction'': Reducing Unnecessary Abstention in Vision-Language Reasoning. arXiv:2402.15610, 2024.
+\bibitem{recall} K.~Ruan, Z.~Huang, Z.~Zhou, Q.~Wei, J.~Lin, X.~Wang and H.~Sun. Doomed from the Start: Early Abort of LLM Agent Episodes via a Recall-Controlled Probe Cascade. arXiv:2607.06503v2, 2026.
+\bibitem{conformal} S.~Tayebati, D.~Kumar, N.~Darabi, D.~Jayasuriya, R.~Krishnan and A.~R.~Trivedi. Learning Conformal Abstention Policies for Adaptive Risk Management in Large Language and Vision-Language Models. arXiv:2502.06884, 2025.
+\bibitem{clusterroute} Y.~Moslem, M.~Kacmajor, V.~Nedumpozhimana, A.~Abbas, S.~Panahi et al. Cluster, Route, Escalate: Cascaded Framework for Cost-Aware LLM Serving. arXiv:2606.27457, 2026.
+\bibitem{deferral} Z.~Liu, Y.~Zeng, Y.~Chang and L.~Lin. Forced Deferral: Manipulating Routing Decisions in Multimodal LLM Cascades. arXiv:2606.15308, 2026.
+\bibitem{cascadefail} Z.~Sun, D.~Chen and S.~Li. When Efficiency Backfires: Cascading LLMs Trigger Cascade Failure under Adversarial Attack. arXiv:2605.17288, 2026.
+\bibitem{vlcache} S.~Qin, H.~Yu, C.~Wu, Z.~Li et al. (Qwen Team, Alibaba). VLCache: Computing 2\% Vision Tokens and Reusing 98\% for Vision-Language Inference. arXiv:2512.12977v2, 2025.
+\bibitem{abstention} N.~Madhusudhan, V.~Yadav and A.~Lacoste (ServiceNow Research). Knowing When Not to Answer: Evaluating Abstention in Multimodal Reasoning Systems. arXiv:2604.14799, 2026.
+\bibitem{recoverr} T.~Srinivasan, J.~Hessel, T.~Gupta, B.~Y.~Lin, Y.~Choi, J.~Thomason and K.~R.~Chandu. Selective ``Selective Prediction'': Reducing Unnecessary Abstention in Vision-Language Reasoning. arXiv:2402.15610, 2024.
 \end{thebibliography}
 
 \end{document}
