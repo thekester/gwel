@@ -25,8 +25,8 @@
 \definecolor{gwelgrid}{HTML}{D8D8D6}
 
 \title{\vspace{-2em}\textbf{Which Escalation Signal Pays Depends on the
-Traffic:\\ Free Baselines, Corpus Ceilings and Graded Actions in Sub-Billion
-VLMs}\vspace{-0.5em}}
+Traffic:\\ Free Baselines, Corpus Ceilings and Graded Actions in Visual
+Cascades Without Training}\vspace{-0.5em}}
 \author{Theophile Avenel\\
 \small\href{https://github.com/thekester/gwel}{github.com/thekester/gwel}}
 \date{}
@@ -41,37 +41,44 @@ VLMs}\vspace{-0.5em}}
 \begin{abstract}
 Vision-language cascades answer from a downsampled image and escalate to full
 resolution when the model appears uncertain. Published policies learn that
-decision by reinforcement learning on 7B-class models and read it from the
-output distribution after generation. We ask what a 500M model can supply
-before it writes a token, and price every candidate against the baseline this
-literature omits: randomising between fixed configurations, which needs no
-signal and traces a convex hull any adaptive policy must clear.
+decision by reinforcement learning on 7B-class models and read it after
+generation. We ask what a sub-billion model supplies \emph{before} it writes a
+token, and price every candidate against the baseline this literature omits:
+randomising between fixed configurations, which needs no signal and traces a
+convex hull any adaptive policy must clear.
 
 The answer inverts between two regimes. Across a four-dataset mixture, output
-entropy never clears the hull, because reading it requires completing the pass
-it prices; a probe on pre-generation activations clears it, but so do the
-image's own pixel dimensions, read from the file header for nothing and within
-$0.010$ of the probe at every operator preference, and a policy given only the
-dataset label dominates both. Inside a workload the ranking reverses: image
-size falls to $0.508$ AUROC and clears nothing on either of the two workloads
-measured, while output entropy on a graded resolution ladder clears by $+0.041$
-to $+0.001$ on the one where the model is strong and at one preference of four
-on the one where it is not, and binary escalation never clears at all. \textbf{Which signal is worth reading is a property of the traffic,
-and a method evaluated only on a mixture will recommend the wrong one for a
-workload.} The probe's apparent advantage ($0.760$ against $0.617$) is a
-between-domain effect, and it is one of eight claims lost to family-wise
-correction over the sixty-three paired comparisons reported here.
+entropy never clears the hull on either serving model, since reading it
+requires completing the pass it prices; the image's pixel dimensions, free from
+the file header, clear it everywhere, and the dataset label alone dominates
+every signal we test. Inside a single workload that descriptor is a weak ranker
+($0.508$ to $0.586$ AUROC on the escalation target across eight corpus-model
+pairs, against $0.609$ to $0.791$ for a model-read signal), yet its policy
+still clears on four of them, at a rate rising monotonically with how steeply
+the serving model prices resolution ($
+ho = 0.914$), and on one it clears
+where the model-read signal does not.
+\textbf{Which signal is worth reading is a property of the traffic, and a
+method evaluated only on a mixture will recommend the wrong one for a
+workload.}
 
-What survives is graded action and measured cost. On $1200$ document pages,
-$93\%$ of what escalation repairs is repaired below the top rung, and accuracy
-saturates at a pixel resolution shared by four models spanning $8.6\times$
-parameters, two lineages and three tokenisers, and by a second corpus that
-reaches the same target while spending half the visual tokens to get there. A fifth model, whose tile grid
-moves independently of its input, makes that ceiling an upper bound rather than
-a constant and separates the quantities the others confound: one pixel rung at
-a fixed token budget buys $+0.108$, while tripling the token budget at fixed
-pixels buys $+0.024\ [-0.006, +0.054]$. We state the procedure that locates the
-ceiling and the sample size it needs.
+We formalise what a hull gap certifies, namely information about cost and
+correctness \emph{jointly} rather than about correctness, which is why a policy
+correlated with per-example cost escapes a mean-cost hull without reading value
+at all. Measured directly, that loophole reaches at most $+0.008$ on seven
+pairs, leaving our clearances there intact, and exceeds both signals on the
+eighth, which we withdraw.
+
+What survives is graded action and measured cost. Thresholding the calibrated
+signed gain at the cost-implied break-even removes the escalation rate as a
+tunable; the standard recipe of calibrating the weak pass's error probability
+over-spends on both models and escalates every query on the smaller. On $1200$ document pages, $93\%$ of what escalation repairs is
+repaired below the top rung, and accuracy saturates at a resolution four models
+agree on, at $640$ to $1312$ visual tokens. A second corpus does not share that
+ceiling: there a weak model's null is its own capacity, which supplies the
+precondition our procedure lacked. All comparisons are corrected for
+family-wise error over the two hundred and twenty-six paired tests reported
+here, of which twenty-four do not survive.
 \end{abstract}
 
 \section{Introduction}
@@ -95,8 +102,17 @@ on 7B-class models, supervised by judge models of their own.
 Below one billion parameters none of that is available. Curating twenty
 thousand samples and running GRPO is not an option for a model that exists
 because it fits in a gigabyte of GPU memory~\cite{smolvlm}. Our question is
-therefore narrow: \emph{what does a 500M VLM already know about its own need
-for more pixels, and how cheaply can that be read?}
+therefore narrow: \emph{what does a sub-billion VLM already know about its own
+need for more pixels, and how cheaply can that be read?}
+
+That scale is the constraint that makes the question sharp, not the object of
+study, and we are careful not to claim more. Every serving model that carries a
+result here has fewer than a billion parameters, and the central comparisons
+are measured on two of them. Nothing we measure shows the conclusions stopping
+at a billion: the two larger models we use as controls behave the same way on
+the saturation question, and whether the inversion of \S\ref{sec:policy} or the
+cascade correction of \S\ref{sec:rule} would survive at 7B is a question our
+budget does not reach.
 
 Fig.~\ref{fig:method} summarises the serving path: a single cheap pass, a
 score, and a choice among resolution rungs priced by measured latency. The
@@ -160,14 +176,22 @@ latencies rather than a tuned rate (Algorithm~2).}
   regimes require opposite answers.} Measured against randomisation between
   fixed configurations, which needs no signal and which the escalation
   literature does not use as a baseline: across a benchmark mixture, raw image
-  size read from the file header clears the hull at every operating point and
-  stays within $0.010$ of a probe on activations, while output entropy never
-  clears it; inside one workload the ranking inverts, image size falls to
-  $0.508$ AUROC and clears nothing, and only entropy on a graded action space
-  clears the hull ($+0.041$ to $+0.001$). A policy that randomises with the
-  probe's mid-prefill abort clears nothing either, which places the probe's
-  margin in its signal and not in its read cost. A method evaluated only on a
-  mixture will recommend the wrong signal for a workload
+  size read from the file header clears the hull at every operating point and,
+  on the $500$M serving model, stays within $0.010$ of a probe on activations,
+  while output entropy never clears it on either sub-billion model tested;
+  inside a workload the \emph{ranking} inverts, image size falling to $0.508$
+  AUROC against a model-read signal's $0.731$. The \emph{policy} does not
+  follow the ranking: the free descriptor still clears on four of eight
+  corpus-model pairs, and how many preferences it clears at rises monotonically
+  with how steeply the serving model prices escalation ($\rho = 0.914$ over the
+  eight). We measure what a policy reading only per-example price achieves
+  against the same hull, which bounds the part of any gap that needs no signal:
+  it is at most $+0.008$ on seven pairs, leaving our clearances there intact,
+  and on the eighth it exceeds both signals and we withdraw that pair
+  (\S\ref{sec:rule}). A policy that randomises
+  with the probe's mid-prefill abort clears nothing either, which places the
+  probe's margin in its signal and not in its read cost. A method evaluated
+  only on a mixture will recommend the wrong signal for a workload
   (\S\ref{sec:policy}, \S\ref{sec:ladder}).
   \item \textbf{A decision rule derived from measured cost, and the cascade
   assumption it corrects.} Calibrating the expected signed gain and thresholding at the
@@ -185,11 +209,11 @@ latencies rather than a tuned rate (Algorithm~2).}
   single-domain pilot with rungs verified distinct per example, accuracy
   saturates at a pixel resolution that four models agree on, spanning
   $8.6\times$ parameters, two lineages and three ways of turning pixels into
-  tokens, and by a second corpus that reaches it while spending half the visual
-  tokens, so a token budget cannot be what runs out. The ceiling is measurable
-  once by a procedure we state and price at about $300$ pages. A fifth model,
-  whose token budget stays flat as resolution rises, saturates a rung earlier,
-  which makes the corpus ceiling an upper bound rather than a constant
+  tokens while spending $640$ to $1312$ of them to get there, so a token budget
+  cannot be what runs out. The ceiling is measurable once by a procedure we
+  state and price at about $300$ pages, and a second corpus supplies the
+  precondition that procedure was missing: a null at the top step is a corpus
+  property only when the serving model is not itself the binding constraint
   (\S\ref{sec:ladder}, \S\ref{sec:singledomain}).
   \item \textbf{A measured cost model.} Every comparison here is a cost
   comparison, so we measure rather than assume, and four standard proxies
@@ -253,7 +277,15 @@ lower cost; Moreno Cencerrado et al.~\cite{cencerrado} isolate a linear
 ``in-advance correctness direction'' that saturates at intermediate layers;
 NVIDIA's LLM Router~\cite{llmrouter} predicts a target model's correctness from
 a \emph{different} model's prefill activations, closing $45.6\%$ of its oracle
-gap. Every probe in this literature predicts whether the model will succeed.
+gap. Afzal et al.~\cite{knowingbefore} report the sharpest version of the
+premise we test: a probe on representations predicts whether a chain of thought
+will succeed \emph{before a single token is generated}, and beats a BERT
+classifier reading the generated tokens, which they attribute to the latter
+relying on shallow linguistic cues. Our mixture result reproduces that ordering
+and our within-domain result inverts it, which is the disagreement
+\S\ref{sec:singledomain} is about: for a VLM inside one workload the signal
+read after generation is the stronger one. Every probe in this literature
+predicts whether the model will succeed.
 None predicts whether an intervention would change the outcome, because for
 text LLMs the intervention is extended reasoning over an unchanged input and the
 two questions nearly coincide. For a VLM they do not, and
@@ -380,7 +412,13 @@ with no image at all; DocVQA loses $40.7$ points to the same cut, and
 correctness flips between the two passes on $50\%$ of its queries against
 $8\%$ for VQAv2. This is the sub-billion transposition of what
 \cite{visionthink} report at $7$B, where a $4\times$ token reduction is nearly
-free outside OCR-heavy benchmarks. The consequence for routing is immediate:
+free outside OCR-heavy benchmarks. That a third of VQAv2 is answered with no
+image at all is also not an artefact of our pilot: Wang et al.~\cite{asciiart}
+construct inputs whose character-level semantics contradict their global visual
+pattern and find state-of-the-art VLMs consistently resolving the conflict in
+favour of the text, with visual recognition degrading as semantic complexity
+rises. A benchmark whose questions are answerable from language priors leaves
+an escalation policy nothing to allocate, whatever it reads. The consequence for routing is immediate:
 in any mixed corpus the escalation signal is entangled with dataset identity
 from the start, and \S\ref{sec:confound} measures how much of the probe's
 apparent skill is exactly that.
@@ -484,9 +522,11 @@ requests. Two facts close this, and neither needs an assumption about what a
 stack achieves.
 
 First, escalation is a cache miss by construction: VLCache keys its cache on a
-hash over the input pixels, and escalating submits different pixels. That
-literature refunds \emph{repetition}, and escalation is the opposite of
-repetition.
+hash over the input pixels, and escalating submits different pixels. The same
+holds for the text-side systems this line grew from: CachedAttention's
+hierarchical store~\cite{cachedattention} exists to reuse the key-value cache of
+\emph{historical tokens} across the turns of one conversation. That literature
+refunds repetition, and escalation is the opposite of repetition.
 
 Second, and independently, decode is uncacheable. Reading output entropy
 requires the cheap pass to \emph{generate}; generation produces the answer,
@@ -816,6 +856,38 @@ quantifies what the training in~\cite{visionthink,adaptvision,awares} is buying.
 It is not a comparison against those systems, which would require reproducing
 their training at a scale where it is not affordable.
 
+\paragraph{One prediction that can be checked against a 7B system without
+running one.} We have declined a numeric comparison with the trained policies
+throughout, because reproducing GRPO at 7B is the thing this setting cannot
+afford. That refusal leaves our structural findings unconnected to the systems
+we position against, and one of them can be connected without any training at
+all.
+
+The finding is that an escalation policy degenerates towards always escalating
+exactly where the cheap pass fails on most queries, because the quantity it
+thresholds saturates while the recoverable share does not. We measure it twice:
+the correctness-calibrated rule sends every query to full resolution on our
+$256$M model against $54\%$ on the $500$M
+(\S\ref{sec:rule}), and on ChartQA the cheap pass is wrong on $80\%$ of queries
+(Table~\ref{tab:chartqa}).
+
+VisionThink~\cite{visionthink}, trained with GRPO on Qwen2.5-VL-7B, reports the
+same behaviour on the same benchmark and says so plainly: on ChartQA their
+model consumes more time than the full-resolution baseline it is meant to
+improve on, because it ``identifies that most questions cannot be answered
+correctly at low resolution and thus autonomously requests high-resolution
+images'', so its total visual-token count exceeds the baseline's. They report
+the opposite on DocVQA, where they are more than twice as fast.
+
+\textbf{Training the decision does not remove the degeneracy; it relocates
+it.} The published system escalates almost everything on the corpus where the
+cheap pass mostly fails, which is what an uncalibrated threshold does and what
+our gain-calibrated rule is constructed to avoid. We cannot say whether our
+correction would help theirs, since their policy is a generated token and not a
+threshold on a score. What we can say is that the failure mode we characterise
+at sub-billion scale is visible in a 7B system's own reported numbers, which is
+the evidence a scale-limited paper can offer about scale.
+
 \paragraph{The whole frontier, not one operating point.} A single escalation
 rate flatters or damns arbitrarily. Sweeping it (Fig.~\ref{fig:frontier}) gives
 a cleaner statement: on this fold every entropy operating point is dominated.
@@ -912,6 +984,14 @@ clear, and no comparison against a single endpoint establishes it.
 Table~\ref{tab:convexity} reports each policy's accuracy minus the hull
 accuracy at its own expected latency, paired over $30$ resampled folds.
 
+\section{Which signal pays depends on the traffic}
+\label{sec:regimes}
+
+This section prices each candidate signal against the randomisation hull,
+first on the benchmark mixture and then inside single workloads. The two
+answers disagree, and the disagreement is the paper's central claim.
+
+
 \begin{table}[t]
 \centering\small
 \setlength{\tabcolsep}{4pt}
@@ -1001,12 +1081,15 @@ it to within $0.007$.}
 \label{tab:freesignal}
 \end{table}
 
-Both answers are inconvenient for the apparatus this paper built. \textbf{A
-signal costing nothing to read clears the hull at every operating point of
-either costing}, and every one of those clearances survives family-wise
-correction. Paired against the probe over the same resamples, the free signal
-differs by at most $0.010$ either way, and of the preferences where one of them
-nominally wins, none survives correction. On this mixture the pre-generation probe
+Both answers are inconvenient for the apparatus this paper built. \textbf{On
+this serving model a signal costing nothing to read clears the hull at every
+operating point of either costing}, and every one of those clearances survives
+family-wise correction. Paired against the probe over the same resamples, the
+free signal differs by at most $0.010$ either way, and of the preferences where
+one of them nominally wins, none survives correction. That equivalence is
+specific to this model: Table~\ref{tab:replicate256} repeats the comparison on
+a $256$M model, where the probe keeps an advantage at tight budgets and the
+free descriptor does not clear under per-example prices at all. On this mixture the pre-generation probe
 buys nothing that the image dimensions do not already supply, and the cases
 where it appears to are the cases the correction removes.
 
@@ -1019,6 +1102,94 @@ made in the opposite direction. What the signal knows, given
 \S\ref{sec:confound}, is which dataset the query came from, and image size
 knows the same thing for free.
 
+
+
+\paragraph{The same comparison on a second sub-billion model, and where it
+stops replicating.} Every number above is measured with one $500$M serving
+model, which is thin evidence for a claim about a scale regime. We repeated the
+whole comparison on SmolVLM-256M over the same $1000$ images, the same
+activations protocol and the same two costings (Table~\ref{tab:replicate256}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{3.5pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+gap to the hull, SmolVLM-256M & $V{=}400$ & $800$ & $1600$ & $3200$ \\
+\midrule
+\multicolumn{5}{l}{\emph{per-configuration prices}} \\
+probe & $\mathbf{+0.046}$ & $+0.013$ & $-0.004$ & $-0.003$ \\
+image size (free) & $+0.033$ & $+0.007$ & $+0.004$ & $+0.002$ \\
+entropy & $-0.000$ & $-0.056$ & $-0.018$ & $-0.008$ \\
+random $+$ abort & $-0.004$ & $-0.004$ & $-0.001$ & $-0.001$ \\
+\midrule
+\multicolumn{5}{l}{\emph{per-example prices}} \\
+probe & $\mathbf{+0.019}$ & $+0.005$ & $-0.004$ & $-0.003$ \\
+image size (free) & $-0.001$ & $-0.002$ & $-0.002$ & $-0.001$ \\
+entropy & $-0.000$ & $-0.046$ & $-0.018$ & $-0.008$ \\
+random $+$ abort & $-0.003$ & $-0.003$ & $-0.001$ & $-0.001$ \\
+\bottomrule
+\end{tabular}}
+\caption{The mixture hull comparison repeated with a $256$M serving model,
+$30$ resampled folds. Two results replicate and one does not.}
+\label{tab:replicate256}
+\end{table}
+
+Two of the three findings replicate and the third does not. Output entropy
+still never clears the hull, at any preference of either costing, and
+randomising with the probe's mid-prefill abort still clears nothing, so the
+margin still belongs to the signal rather than to the read mechanism. What does
+not replicate is the equivalence between the probe and the free descriptor.
+Under per-configuration prices the free descriptor clears at all four
+preferences and the probe at two; under the per-example prices we argue are the
+honest ones, the free descriptor clears at none and the probe still clears at
+the two tightest budgets, beating it by $0.019\ [0.014, 0.024]$ at $V{=}400$.
+
+\textbf{The claim that a file-header read matches a probe on activations is
+therefore specific to the $500$M model, not to the scale.} On the smaller model
+the pre-generation read earns its cost where the budget binds, which is the
+regime an efficiency paper cares about most.
+
+The workload half of the inversion was also measured on one model, so we
+repeated it too: on DocVQA with the $256$M model the free descriptor clears
+nothing at either rule or any preference, as on the $500$M, while the entropy
+ladder clears at one preference of four rather than three. The ordering
+survives the change of model and the margin does not. Across the four
+workload-model pairs we then had, the free descriptor cleared nothing in any.
+A fifth pair, added later with a third lineage, is the exception and is
+analysed in \S\ref{sec:ladder}: there it clears while remaining at chance on
+the target, which separates ranking from cost allocation.
+
+We state the general claim as the weaker one both models support, that a free descriptor is a comparator this
+literature has to beat and that entropy does not beat it either, and we do not
+claim the equivalence beyond the model on which it was measured.
+
+
+\paragraph{Signal or detector?} A free descriptor that clears the hull across
+benchmarks and fails inside every one of them admits two readings, and they
+differ for anyone deciding whether to deploy it. Either image size carries
+information about whether more pixels would help, distributed unevenly across
+benchmarks, or it is a benchmark detector that works only because benchmarks
+differ in escalation value. Separating them needs a stratum where size still
+varies and provenance is mixed, and the pilot contains one: images between
+$1024$ and $1936$\,px, $n=288$, standard deviation $230$\,px, $15\%$ minority
+provenance.
+
+Inside it the descriptor predicts the source dataset at AUROC $0.976$ and the
+escalation gain at $0.579$. The value gap it would need to be reading survives
+in full: escalation repairs $36\%$ of the DocVQA pages in the stratum against
+$13\%$ of the TextVQA ones. \textbf{Image size is a provenance detector.} Its
+pooled $0.730$ on the escalation gain is bought by separating benchmarks that
+differ in value, not by ranking queries within one, which is the same finding
+\S\ref{sec:confound} reports for the probe and the reason both fail inside a
+workload.
+
+The consequence is a deployment condition rather than a caveat. A router whose
+traffic couples image size to provenance, as a mixture of public benchmarks
+does, can read the file header and skip the model. A router whose traffic
+varies in content at similar sizes cannot, and nothing in this paper tells it
+what to read instead beyond the model's own uncertainty.
 
 \paragraph{And an upper bound on what the confound can be worth.} If the
 signals above are reading dataset identity, the natural ceiling is a policy
@@ -1101,23 +1272,27 @@ $0.007$.}
 central claim.} Across a mixture of benchmarks, escalation value is carried by
 which benchmark a query came from, a free image descriptor recovers it, and
 neither output entropy nor a probe on activations earns its read cost. Inside a
-single workload that between-domain axis is gone: the free descriptor collapses
-to chance, and what clears the hull is a signal read from the model, spent on a
-graded action space rather than on a binary one. Neither regime is the general
-case, and a method evaluated only in the first will recommend the wrong thing
-for the second.
+single workload that between-domain axis is gone: the free descriptor falls to
+$0.508$ to $0.586$ AUROC on the escalation target, and what ranks queries by
+value is a signal read from the model, spent on a graded action space rather
+than on a binary one. Neither regime is the general case, and a method
+evaluated only in the first will recommend the wrong thing for the second.
 
-The two halves rest on different amounts of evidence and we separate them here.
-The negative half, that a free descriptor stops working once the between-domain
-axis is removed, is measured on both workloads we collected. The positive half,
-that a model-read signal on a graded action space clears the hull, is measured
-on DocVQA at three preferences of four and on InfographicVQA at one of four
-(\S\ref{sec:ladder}); on the latter the serving model answers only $0.368$ of
-the corpus at its ceiling, so most queries are unanswerable at any rung and
-there is little for any policy to allocate. What we claim generally is the
-inversion of the \emph{ordering} between the two signals. How much the winning
-side is worth is corpus-dependent, and on a corpus where the model is weak it
-is worth little.
+The two halves are measured on eight corpus-model pairs and they do not carry
+equal weight. \emph{As a ranking claim the inversion is unqualified}: the
+descriptor is the weaker value ranker on all eight, scoring $0.508$ to $0.586$
+on the escalation target against a model-read signal's $0.609$ to $0.791$.
+\emph{As a policy claim it is not}, and the difference is what \S\ref{sec:rule}
+is about. The model-read ladder clears the hull on five of the eight by
+$+0.023$ to $+0.075$, against a signal-free slack of at most $+0.008$ on those
+pairs; it fails on InfographicVQA read by the $500$M model, where the serving
+model is the binding constraint, and its clearance on InfographicVQA read by
+Qwen2-VL-2B is withdrawn because a signal-free policy does better there. The descriptor's own policy clears on the three pairs whose serving
+model prices resolution steeply, about half of which is budget allocation that
+needs no signal at all. What we claim generally is the inversion of the
+\emph{ordering} on the ranking target. Whether that ordering has cash value
+depends on the price structure of the serving model, and on one pair it
+reverses outright.
 
 That is also the reading under which our own negative results stop being
 awkward. The probe fails inside a domain (\S\ref{sec:singledomain}) and is
@@ -1125,6 +1300,132 @@ redundant across one; output entropy fails across a mixture
 (Table~\ref{tab:freesignal}) and is the only signal that works inside one. Both
 failures are the same fact seen from two sides: a signal is worth exactly the
 variance it explains that the free features do not.
+
+
+\paragraph{A third workload, and the guard that fires on it.} The positive half
+of the inversion rested on one corpus, so we collected a third: $500$ ChartQA
+questions, scored with the relaxed accuracy the benchmark defines (a numeric
+answer within $5\%$ of the gold value, exact match otherwise), because grading
+chart answers by edit distance would award partial credit for being close to a
+different number.
+
+Step~3 of Algorithm~3 fires before any policy is priced. ChartQA charts have a
+median longest edge of $800$\,px, so the $1152$\,px and full-resolution targets
+are upsampling: token counts rise on $2\%$ and $0\%$ of pages respectively,
+against $99\%$ and $95\%$ on DocVQA. The procedure discards both as duplicates
+and leaves a two-rung ladder, which is the first time one of this paper's own
+guards has rejected a configuration on a corpus it was not written against.
+What remains is a binary choice, and the comparison is run on that
+(Table~\ref{tab:chartqa}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+gap to the hull, ChartQA & $V{=}400$ & $800$ & $1600$ & $3200$ \\
+\midrule
+output entropy & $+0.020$ & $\mathbf{+0.032}$ & $+0.019$ & $+0.012$ \\
+image size (free) & $+0.005$ & $-0.002$ & $-0.003$ & $-0.003$ \\
+\bottomrule
+\end{tabular}}
+\caption{The surviving rung on $500$ ChartQA questions, $30$ resampled folds,
+per-example prices. Every entropy interval excludes zero. The ladder and the
+binary rule coincide here to within $0.002$, because Algorithm~3 left only one
+rung for either to choose.}
+\label{tab:chartqa}
+\end{table}
+
+\textbf{The inversion holds as a statement about ranking, and the policy side
+is decided by price.} The free descriptor is a weak ranker inside every
+workload we have measured, scoring $0.508$ to $0.586$ on the escalation gain
+against a model-read signal's $0.609$ to $0.791$ over eight pairs. Its \emph{policy} is another
+matter and depends on the serving model rather than the corpus, which
+Table~\ref{tab:workloads} shows and \S\ref{sec:rule} explains. A signal read from the model clears the hull on two of the
+three, at four preferences of four on ChartQA and three of four on DocVQA, all
+surviving correction. On InfographicVQA it clears at one preference nominally
+and that clearance is lost to the correction ($p = 0.004$, adjusted $0.108$),
+while at the loosest preference the ladder sits significantly \emph{below} the
+hull. We read that as the corpus rather than the signal: the model answers only
+$0.368$ of it at the ceiling, so most queries are unanswerable at any rung and
+there is little for any policy to allocate.
+What varies is whether \emph{graded} actions add anything on top: on DocVQA the
+top rung is dear and binary escalation over-serves, so the ladder clears where
+binary does not; on ChartQA one step is all the corpus supports and the two
+rules coincide. The claim we make generally is about which signal to read. How
+much the winning signal is worth, and whether it needs more than two actions,
+is a property of the corpus and its prices.
+
+
+\paragraph{A third lineage, and the exception that separates ranking from
+allocation.} The workload half of the inversion rested on the SmolVLM family
+and one run where the model was too weak to allocate anything. LLaVA-OneVision
+at $0.5$B is a third lineage at the same scale, a Qwen2 language model with a
+SigLIP encoder and anyres tiling, and its rungs are genuinely distinct: $1323$,
+$3051$ and $5913$ visual tokens at $384$, $768$ and $1152$\,px. We ran it on
+$500$ of the same DocVQA pages (Table~\ref{tab:workloads}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcc}
+\toprule
+workload and serving model & entropy ladder & free descriptor \\
+\midrule
+DocVQA, SmolVLM-500M & $3/4$ & $0/4$ \\
+DocVQA, SmolVLM-256M & $1/4$ & $0/4$ \\
+DocVQA, Qwen2-VL-2B & $4/4$ & $\mathbf{4/4}$ \\
+DocVQA, LLaVA-OneVision-0.5B & $3/4$ & $\mathbf{4/4}$ \\
+DocVQA, SmolVLM2-2.2B & $3/4$ & $1/4$ \\
+InfographicVQA, SmolVLM-500M & $0/4$ & $0/4$ \\
+InfographicVQA, Qwen2-VL-2B & $4/4^{\ddagger}$ & $3/4^{\ddagger}$ \\
+ChartQA, SmolVLM-500M & $4/4$ & $1/4$ \\
+ChartQA, LLaVA-OneVision-0.5B & $\mathbf{0/4}$ & $\mathbf{3/4}$ \\
+\bottomrule
+\end{tabular}}
+\caption{Operator preferences of four at which each ladder clears the
+randomisation hull, nominally. The free descriptor clears at three or four
+preferences on the three pairs whose serving model prices escalation steeply
+and at no more than one elsewhere, the single ChartQA/SmolVLM-500M clearance
+not surviving the family-wise correction. On the last row it clears where the
+model-read signal does not. Table~\ref{tab:slack} measures how much of each
+column a policy reading only cost also obtains: at most $+0.008$ on seven of
+the eight pairs, so no entry there is displaced by it. $\ddagger$: on
+InfographicVQA read by Qwen2-VL-2B the signal-free policy reaches $+0.054$,
+above both columns, so neither entry on that row is attributable to its
+signal.}
+\label{tab:workloads}
+\end{table}
+
+\textbf{The free descriptor clears the hull here while ranking at chance.}
+Inside this corpus it predicts the top-rung gain at AUROC $0.518$, against
+output entropy's $0.731$, so it is provably not ordering queries by value; yet
+its ladder clears at three preferences of four. Cost allocation, not ranking,
+carries about half of that. This model's anyres tiling makes the price of
+escalating a page rise steeply with that page's size, so allocating budget by
+size is partly allocating by \emph{cost}, and Proposition 2 shows such a policy
+can beat a hull built on mean costs without knowing which queries would
+benefit. \S\ref{sec:rule} measures the share directly by running a policy that
+reads price and nothing else: it supplies $+0.007$ of the descriptor's
+$+0.013$ here. The remainder is not accounted for by anything we could
+measure, and we do not claim it as value ranking.
+
+That distinction was invisible on the SmolVLM family, whose patch grid
+quantises every page to the same handful of token counts, and it narrows what
+\S\ref{sec:policy} is entitled to claim. A free descriptor is a weak value ranker inside every
+workload we measure, scoring $0.508$ to $0.586$ on the escalation gain against
+a model-read signal's $0.609$ to $0.791$, and that is what the AUROC column
+records. It is a better \emph{cost allocator} than value ranker, though only about half
+of its advantage here is allocation a signal-free policy also obtains, and
+whether allocating pays at all depends on how steeply the serving model prices
+its own rungs. On this pair the
+model-read signal still wins the policy comparison by
+$+0.025\ [+0.020, +0.030]$ at the loosest preference. It does not win
+everywhere: \S\ref{sec:ladder} reports a sixth pair, crossing both the model
+and the corpus axes, where the ordering reverses because escalation is barely
+worth its price and a calibrated rule correctly declines to buy it.
 
 \paragraph{A better ranking, again, and again no better policy.} Since our own
 numbers say the ceiling is the signal, we tried to improve the signal. Entropy
@@ -1547,6 +1848,132 @@ ours coincide. \textbf{The two rules agree exactly when escalation cannot make
 things worse, and Table~\ref{tab:rule} is what their difference costs when it
 can.}
 
+\paragraph{What the contrapositive does not give.} Exact independence is a
+convenience of the statement, not a description of any real signal, so the
+certificate is qualitative: it separates signals carrying \emph{some}
+information about $(c, y)$ from those carrying none, and almost every signal is
+in the first class. The size of a hull gap has no direct informational reading,
+because it depends on the conditional variance of $(c_i, y_i)$ given the signal
+and on where the operating budget falls between the fixed points, so the same
+signal can show a large gap at a tight budget and none at a loose one, as
+Table~\ref{tab:convexity} does. We therefore use the gap as a comparator
+between policies at matched budget, which is what every table reports, and
+never as a measure of how much a signal knows. What we can put a scale on is
+the part of a gap that needs no signal at all, and
+Table~\ref{tab:slack} measures it per pair.
+
+\paragraph{How much of a gap needs no signal at all.} The loophole above is a
+statement about the comparator and it deserves a number rather than a
+description. We measure it directly: a policy that escalates the queries
+\emph{cheapest to escalate} up to a budget, reading the per-example price and
+nothing else, swept over rates and scored against the same hull
+(Table~\ref{tab:slack}). A server can estimate that price before deciding,
+since these models charge by visual-token count, so this is a deployable policy
+and not only an analytic device.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+ & & \multicolumn{2}{c}{cost-only} & \multicolumn{2}{c}{our ladders} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+corpus, serving model & spread & binary & graded & entropy & free \\
+\midrule
+InfoVQA, SmolVLM-500M & $1.6\times$ & $-0.004$ & $-0.011$ & $+0.006$ & $-0.004$ \\
+DocVQA, SmolVLM-256M & $2.0\times$ & $-0.028$ & $+0.004$ & $+0.023$ & $-0.001$ \\
+DocVQA, SmolVLM-500M & $2.3\times$ & $-0.049$ & $+0.003$ & $+0.041$ & $+0.000$ \\
+DocVQA, SmolVLM2-2.2B & $5.4\times$ & $-0.036$ & $+0.003$ & $+0.040$ & $+0.005$ \\
+InfoVQA, Qwen2-VL-2B & $16.3\times$ & $+0.030$ & $\mathbf{+0.054}$ & $+0.043$ & $+0.018$ \\
+DocVQA, Qwen2-VL-2B & $41.1\times$ & $-0.020$ & $+0.008$ & $+0.075$ & $+0.018$ \\
+ChartQA, LLaVA-OV-0.5B & $53.4\times$ & $-0.008$ & $+0.001$ & $-0.000$ & $+0.010$ \\
+DocVQA, LLaVA-OV-0.5B & $77.4\times$ & $-0.011$ & $+0.007$ & $+0.038$ & $+0.013$ \\
+\bottomrule
+\end{tabular}}
+\caption{The largest gap reachable while reading \emph{only} per-example price,
+in the binary action space and in the graded one, against the largest gap our
+own two ladders reach. Thirty resampled folds; the cost-only policies order by
+predicted visual-token count, so no signal about the query enters. A reported
+gap is attributable to its signal only above the graded column. Rows are
+ordered by cost spread, the ratio of mean full-pass to mean cheap-pass latency.
+The bold row is the one pair where a signal-free policy beats both of our
+signals.}
+\label{tab:slack}
+\end{table}
+
+\textbf{The loophole is real but small, and the naive version of it does not
+work at all.} A binary cost-only policy sits \emph{below} the hull on seven of
+the eight pairs, because the queries that are cheap to escalate are also the
+ones escalation helps least, and buying them at the top rung's mean price is a
+bad trade. The graded policy, which spends the same budget on more queries at
+smaller steps, does clear, but on seven pairs never by more than $+0.008$.
+Every clearance we report on those seven survives that bar, the entropy
+ladder's $+0.041$, $+0.023$, $+0.075$, $+0.040$ and $+0.038$ against slacks of
+$+0.003$, $+0.004$, $+0.008$, $+0.003$ and $+0.007$. \textbf{On those pairs the
+randomisation hull is a nearly tight floor}, measured rather than assumed,
+which is what makes it usable as the comparator we ask this literature to
+adopt.
+
+\textbf{The eighth pair is the exception and we do not explain it away.} On
+InfographicVQA read by Qwen2-VL-2B a graded cost-only policy reaches $+0.054$,
+above both our entropy ladder's $+0.043$ and the free descriptor's $+0.018$, so
+\emph{neither} clearance on that pair is attributable to its signal and we
+withdraw both. It is also the only pair where the binary policy clears. What
+distinguishes it is that escalation there is both expensive and unusually
+valuable: this is the corpus where the same model keeps gaining past our
+highest rung (\S\ref{sec:ladder}), so a policy that merely buys more
+escalations for the money captures a great deal without knowing which ones to
+buy. The lesson is not that the comparator is unusable but that its slack is a
+per-pair quantity and has to be measured per pair, which costs one sweep.
+
+\textbf{The measurement has to be made on predicted cost, and this is not a
+detail.} Our first version of this experiment ordered queries by their
+\emph{measured} escalation latency and reported slacks up to $+0.053$, large
+enough to withdraw two of our own results. It was an artefact. Each pass in the
+single-domain pilots is timed once (\S\ref{sec:reproducibility}), and on the SmolVLM
+ladder $18\%$ of first-step latencies come out non-positive, which is timing
+noise and not a free upgrade. A policy sorting on that measurement selects the
+examples whose noise ran favourably, banks the accuracy, and lets the noise
+absorb the cost. The size of the illusion is easy to state: escalating the
+cheapest tenth of the corpus, selection by measured latency reports $93$\,ms
+spent for $+0.517$ accuracy, while selection by predicted token count reports
+$188$\,ms for $+0.400$. The first is not a better policy, it is the same
+policy scored against its own measurement error. Ordering instead on visual-token count, which is a
+deterministic function of the image and the processor and which a server holds
+before it decides, removes the channel and every number moves. We report the
+episode because the failure mode is not specific to us: \textbf{any per-example
+cost-aware policy evaluated on single-shot timings can harvest its own
+measurement noise}, and the defence is to select on a predicted cost and price
+on the measured one.
+
+\textbf{Cost allocation is a partial mechanism, and this puts a share on it.}
+\S\ref{sec:policy} read the free descriptor's clearance on steeply priced
+models as budget allocation rather than value ranking. The graded cost-only
+policy is that account in its purest form, and it accounts for $46\%$ of the
+descriptor's gap on Qwen2-VL-2B ($+0.008$ of $+0.018$) and $54\%$ on
+LLaVA-OneVision ($+0.007$ of $+0.013$), while on the two SmolVLM pairs both
+quantities are indistinguishable from zero together. Across the eight pairs the
+slack and the descriptor's gap rank alike, which is consistent with the account
+rather than evidence for it [À VÉRIFIER: eight points, post-hoc]. What it does not explain is the crossed
+cell, where the descriptor reaches $+0.010$ and cost allocation supplies
+$+0.001$ of it. \textbf{Roughly half of the free descriptor's advantage on
+steeply priced models is budget allocation available without any signal; the
+remainder is unexplained and we do not claim it as value ranking}, since the
+descriptor's AUROC on the escalation target is $0.518$ to $0.586$
+[RESULT NEEDED: what carries the residual].
+
+\textbf{The floor this comparator relaxes.} Proposition 2 takes the hull over
+fixed configurations priced at their mean cost, which is what this literature
+would compare against if it compared at all. The tight floor is the hull over
+policies measurable with respect to the per-example cost vector, of which ours
+is a relaxation. The measurements above bound the relaxation at $+0.008$ on
+seven of these eight pairs, so the two floors nearly coincide there; on the
+eighth, and on a serving stack
+whose price varies more sharply across queries they need not, and the
+cost-only column should be measured alongside any reported gap rather than
+assumed small.
+
 \paragraph{The break-even is signal-dependent, and that is the probe's second
 advantage.} Line 6 differences Eq.~\ref{eq:policycost}. A policy reading entropy
 must finish the cheap pass before deciding, so escalation adds the whole
@@ -1615,6 +2042,25 @@ not detect.}
 \label{fig:reliability}
 \end{figure}
 
+
+\paragraph{The contrast on a second sub-billion model.} Table~\ref{tab:rule} is
+one model, so we repeated it on SmolVLM-256M over the same images, the same
+signal and the same preference. The direction replicates and the failure mode
+is sharper: calibrating the weak pass's error probability sends
+\emph{every} query to full resolution, where calibrating the signed gain sends
+$58\%$, and the gain rule is $43.2\ [36.5, 50.4]$\,ms per query cheaper at an
+accuracy difference of $-0.030\ [-0.065, +0.005]$ that spans zero. On the
+$500$M model the same comparison gives $20.6\ [14.9, 26.8]$\,ms and
+$0.000\ [-0.025, +0.025]$.
+
+The reason the smaller model makes it worse is the reason the correction
+exists. A weaker cheap pass is wrong more often, so $P(\text{cheap wrong})$
+rises for almost every query while the \emph{gain} from escalating does not,
+since more of those failures are unrecoverable at any resolution. A rule
+thresholding the first therefore saturates, and a rule thresholding the second
+does not. \textbf{The correction matters more, not less, as the serving model
+gets weaker}, which is the direction this paper's scale argument runs in.
+
 \paragraph{Does removing the knob cost anything?} It should not, if the rule is
 right. Sweeping $V$ over $100$ to $3200$\,ms per correct answer places six
 operating points on the accuracy-latency plane without any rate ever being
@@ -1665,6 +2111,130 @@ discovered ``never escalate'' on one fold and had no way to say whether that was
 a preference or an artefact. Where a floor on escalation is required instead,
 \cite{recall}'s recall-controlled gates give one that cannot degenerate by
 construction.
+
+
+\paragraph{What clearing the hull certifies, and what it does not.} The
+comparator deserves a statement rather than an intuition, because the
+conclusion drawn from it is a claim about information. Write $c_i(x)$ for the
+cost of serving query $x$ at configuration $i$ and $y_i(x) \in \{0,1\}$ for its
+correctness there, and let a policy $\pi$ be measurable with respect to a
+signal $s$, meaning it sees $s(x)$ and nothing else.
+
+\vspace{2pt}
+\noindent\textbf{Proposition 2.} \emph{If $s$ is independent of the joint
+vector $\bigl(c(x), y(x)\bigr)$, then the operating point
+$\bigl(\mathbb{E}[\text{cost}], \mathbb{E}[\text{accuracy}]\bigr)$ of any
+$s$-measurable policy lies in the convex hull of the fixed points
+$\bigl(\mathbb{E}[c_i], \mathbb{E}[y_i]\bigr)$.}
+
+\vspace{2pt}
+\noindent\emph{Proof.} Condition on $s$. Writing $\pi_i(s)$ for the probability
+the policy serves configuration $i$, independence gives
+$\mathbb{E}[y_{\pi} \mid s] = \sum_i \pi_i(s)\,\mathbb{E}[y_i]$ and likewise
+for the cost, since conditioning on $s$ changes neither marginal. Taking the
+expectation over $s$ yields $\sum_i \mathbb{E}[\pi_i(s)]\,\mathbb{E}[y_i]$ with
+weights that are non-negative and sum to one, which is a convex combination of
+the fixed points. $\square$
+
+\vspace{2pt}
+The contrapositive is the comparator this paper uses: a policy strictly above
+the hull certifies that its signal is \emph{not} independent of
+$\bigl(c, y\bigr)$. Two things follow, and the second is why the proposition is
+worth stating.
+
+First, the hull is the right floor and a single fixed endpoint is not.
+Comparing an adaptive policy to always-cheap or always-full establishes
+nothing, because randomising between them already reaches every point of the
+segment between them at no informational cost. That comparison is standard in
+text routing, where \cite{lugoloobi} plot their cascades against it, and absent
+from the visual escalation evaluations we survey.
+
+Second, and less comfortably, the certificate is about the \emph{pair}
+$(c, y)$, not about correctness alone. A signal carrying no information about
+which queries escalation would repair, but some about what escalating them
+costs, clears the hull by allocating budget rather than by ranking value.
+
+That is not a hypothetical, and we state its status carefully. We wrote this
+proposition \emph{after} observing a free descriptor clear the hull on one
+serving model while scoring at chance on the escalation target
+(\S\ref{sec:ladder}), so what follows is a post-hoc explanation, not a
+forecast. What makes it more than a restatement is that it implied a quantity
+we had not measured and which could have come out flat: if cost is the channel,
+the descriptor must correlate with per-page escalation cost on the model where
+it clears and not on the model where it does not.
+
+\begin{center}\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+corpus, serving model & $\rho(\text{size}, \Delta t)$ & spread & free & entropy \\
+\midrule
+InfoVQA, SmolVLM-500M & $+0.008$ & $1.6\times$ & $0/4$ & $1/4$ \\
+DocVQA, SmolVLM-256M & $+0.142$ & $2.0\times$ & $0/4$ & $1/4$ \\
+DocVQA, SmolVLM-500M & $+0.083$ & $2.3\times$ & $0/4$ & $3/4$ \\
+DocVQA, SmolVLM2-2.2B & n/a & $5.4\times$ & $1/4$ & $3/4$ \\
+InfoVQA, Qwen2-VL-2B & n/a & $16.3\times$ & $3/4$ & $4/4$ \\
+DocVQA, Qwen2-VL-2B & $+0.342$ & $41.1\times$ & $4/4$ & $4/4$ \\
+ChartQA, LLaVA-OV-0.5B & $+0.151$ & $53.4\times$ & $\mathbf{3/4}$ & $\mathbf{0/4}$ \\
+DocVQA, LLaVA-OV-0.5B & $+0.336$ & $77.4\times$ & $4/4$ & $3/4$ \\
+\midrule
+DocVQA, InternVL3-1B & $-0.099$ & $1.00\times$ & \multicolumn{2}{c}{excluded} \\
+ChartQA, SmolVLM-500M & $+0.130$ & $1.26\times$ & \multicolumn{2}{c}{excluded} \\
+\bottomrule
+\end{tabular}}
+\end{center}
+
+\noindent Operator preferences of four at which each ladder clears the hull,
+ordered by how steeply the serving model prices escalation. The last two rows
+are excluded because configurations that barely differ in cost make a hull gap
+arbitrarily sensitive to a millisecond. The two rows marked n/a are pairs we
+added to interpolate the price axis and for which we did not extract the
+size-cost correlation, since the ordering variable is the spread. That
+criterion is a property of the
+pair and not of the result, so it applies wherever a hull gap is read: the
+ChartQA/SmolVLM-500M entries in Table~\ref{tab:workloads} are reported for
+completeness and are not used as evidence anywhere, including where they favour
+us.
+
+\textbf{The correlation is not what separates them, the price is.} We first
+read the split as the descriptor tracking cost, and one row refutes that: the
+descriptor clears at $\rho = +0.151$ on ChartQA/LLaVA-OneVision where it clears
+nothing at a slightly higher $+0.142$ on DocVQA/SmolVLM-256M. What orders the
+pairs is the cost spread, and over these eight it does so monotonically: the
+descriptor clears at $0$, $0$, $0$, $1$, $3$, $4$, $3$ and $4$ preferences of
+four as the spread rises from $1.6\times$ to $77.4\times$ (Spearman $\rho =
+0.914$, $p = 0.0015$). Two of the eight, at $5.4\times$ and $16.3\times$, were
+added specifically to fill the gap our first six left between $2.3\times$ and
+$41.1\times$, since a threshold placed inside a void is not a measurement. The
+relationship is still one we found rather than predicted, and we label it as
+post-hoc.
+
+\textbf{And the ordering claim has a counterexample, in the row that crosses
+both axes.} On ChartQA read by LLaVA-OneVision, the free descriptor clears at
+three preferences and the model-read signal at none. The reason is not that the
+descriptor ranks better: it scores $0.586$ on the escalation gain against
+entropy's $0.609$. It is that escalation there repairs $12\%$ of queries and
+damages $5\%$, a net $7\%$ for a pass costing $53\times$ the cheap one, so a
+calibrated rule reading the gain correctly declines to escalate at every
+preference we sweep and sits on the cheap vertex, where its gap is zero by
+construction.
+
+\textbf{This is a limitation of the comparator, not a virtue of the
+descriptor.} The hull is built from the mean cost of each fixed configuration.
+A policy whose signal correlates with \emph{per-example} cost can therefore
+beat it by escalating the cheap instances, without any information about which
+instances would benefit. Proposition 2 says as much, since its independence
+condition is over the joint vector and not over correctness alone; what the
+crossed cell adds is that the loophole is large enough to reverse an ordering
+we had stated generally. How large it is in absolute terms is an empirical
+question rather than a corollary, and Table~\ref{tab:slack} answers it: at most
+$+0.008$ on seven of the eight pairs, and $+0.054$ on the eighth, where it
+exceeds both signals. Where it is small it reverses an ordering only because
+the ordering it reverses is itself worth about that much. We
+therefore retract that ordering as a general claim, keep the hull as the floor
+it is, and read it alongside the target-specific AUROC throughout: \textbf{a
+hull gap is evidence of information about the cost-correctness pair, and only a
+measurement against the target says which of the two a policy is using.}
 
 \subsection{The rule transfers where the signal does not}
 \label{sec:transfer}
@@ -2149,6 +2719,9 @@ at $n \approx 100$ mid-collection on the out-of-lineage run.
 \vspace{1pt}\hrule\vspace{3pt}
 \begin{tabbing}
 xx\=xx\=\kill
+0\> check the serving model is not the binding constraint on this \\
+\> corpus: a null at the top step is a ceiling only if a model \\
+\> reaching materially higher accuracy agrees with it \\
 1\> draw $n$ pages from the corpus ($n \geq 300$, Table~\ref{tab:samplesize}) \\
 2\> for each candidate pixel target $p$, \emph{measure} the visual tokens \\
 \> the serving model spends on each page at $p$ \\
@@ -2198,12 +2771,14 @@ names.}
 \end{table}
 
 
-\paragraph{The procedure on a corpus it has not seen, and a prediction it
-refutes.} An earlier version of this paper predicted that a benchmark of denser
-type should place the ceiling higher than DocVQA's $1152$\,px. We collected one
-and ran Algorithm~3 on it unchanged: $500$ InfographicVQA pages, the same task,
-the same ANLS metric, the same pixel targets, and pages carrying a far wider
-range of type sizes (Table~\ref{tab:corpora}).
+\paragraph{The procedure on a corpus it has not seen, and what a second model
+does to the answer.} An earlier version of this paper predicted that a
+benchmark of denser type should place the ceiling higher than DocVQA's
+$1152$\,px. We collected one and ran Algorithm~3 on it unchanged: $500$
+InfographicVQA pages, the same task, the same ANLS metric, the same pixel
+targets. Read with the $500$M model the ceiling did not move. Read with a
+second and much stronger model it moves past the top rung we run
+(Table~\ref{tab:corpora}), and that difference is the section's result.
 
 \begin{table}[t]
 \centering\small
@@ -2211,50 +2786,49 @@ range of type sizes (Table~\ref{tab:corpora}).
 \resizebox{\columnwidth}{!}{%
 \begin{tabular}{lccccc}
 \toprule
-& $384$ & $768$ & $1152$ & $2048$ & ceiling \\
+corpus, model & $384$ & $768$ & $1152$ & $2048$ & top step \\
 \midrule
-DocVQA ($n{=}1200$) & $0.279$ & $0.662$ & $\mathbf{0.748}$ & $0.746$ & $1152$ \\
-InfographicVQA ($n{=}500$) & $0.230$ & $0.282$ & $\mathbf{0.368}$ & $0.360$ & $1152$ \\
+DocVQA, $500$M & $0.279$ & $0.662$ & $\mathbf{0.748}$ & $0.746$ & $-0.002$ \\
+InfoVQA, $500$M & $0.230$ & $0.282$ & $\mathbf{0.368}$ & $0.360$ & $-0.008$ \\
+InfoVQA, Qwen2-VL-2B & $0.350$ & $0.488$ & $0.580$ & $\mathbf{0.650}$ & $\mathbf{+0.070}$ \\
 \midrule
 \multicolumn{6}{l}{\emph{median visual tokens spent at each target}} \\
-DocVQA & $64$ & $320$ & $\mathbf{640}$ & $1088$ & \\
-InfographicVQA & $64$ & $192$ & $\mathbf{320}$ & $576$ & \\
+DocVQA, $500$M & $64$ & $320$ & $640$ & $1088$ & \\
+InfoVQA, $500$M & $64$ & $192$ & $320$ & $576$ & \\
+InfoVQA, Qwen2-VL-2B & $70$ & $297$ & $609$ & $1312$ & \\
 \bottomrule
 \end{tabular}}
-\caption{The same procedure on two corpora. The top steps are
-$-0.002\ [-0.024, +0.022]$ and $-0.008\ [-0.044, +0.028]$, both inside the
-precision bar of Algorithm~3's step~6. The $768 \to 1152$ step pays on both,
-$+0.086$ each.}
+\caption{The same procedure on two corpora and, on the second, two models. The
+$500$M top steps are tight nulls ($[-0.024,+0.022]$ and $[-0.044,+0.028]$); the
+stronger model's is a gain of $+0.070\ [+0.032,+0.110]$, so on
+InfographicVQA the ceiling lies above the highest rung we run.}
 \label{tab:corpora}
 \end{table}
 
-\textbf{The prediction fails and the claim it was attached to survives in a
-stronger form.} The ceiling does not move: both corpora stop paying at
-$1152$\,px, and on both the top step is a measured null rather than an absence
-of measurement. What moves is the price. The same pixel target costs $640$
-visual tokens on DocVQA and $320$ on InfographicVQA, whose pages are tall and
-narrow and fill fewer patches at a given longest edge, so two corpora reach an
-identical ceiling while spending a factor of exactly two apart. Read alongside
-the cross-model result above, the ceiling is invariant to the serving model at
-fixed corpus and to the corpus at fixed pixel target, while the token count at
-that ceiling varies by $2.05\times$ across models and $2.00\times$ across
-corpora. \textbf{A token budget cannot be what runs out if two corpora exhaust
-it at half each other's spend.}
+\textbf{A null at the top step is only a corpus ceiling if the model is not the
+binding constraint, and this is the counterexample.} On InfographicVQA the
+$500$M model peaks at $0.368$ and stops gaining at $1152$\,px. Qwen2-VL-2B
+reads the same pages to $0.650$ and is still gaining $+0.070$ at the top rung.
+The weaker model's null was its own capacity, not the pages' legibility, and
+Algorithm~3 as stated would have called it a corpus ceiling. \textbf{We
+therefore withdraw the claim, made in an earlier version of this section, that
+two corpora share a $1152$\,px ceiling.} What holds is narrower: DocVQA has a
+ceiling at $1152$\,px that four models of very different strength agree on,
+including one that reads it to $0.892$ and is therefore not capacity-limited
+there; InfographicVQA has no ceiling we have located, and the rungs we run do
+not reach it.
 
-We report the failed prediction rather than deleting it. It was the reason to
-collect this corpus, and its failure upgrades ``$1152$\,px is DocVQA's number''
-to ``$1152$\,px is where two document corpora stop paying''. That is wider than
-we were entitled to before and narrower than universality: both are
-document-QA, and a corpus of genuinely finer print remains untested.
-
-One thing does not transfer with it. On InfographicVQA the model is far weaker
-($0.368$ against $0.748$ at the ceiling), and the ladder's advantage over the
-hull nearly disappears: it clears at one operator preference of four
-($+0.006\ [+0.002, +0.011]$ at $V{=}800$) rather than at three. The free image
-descriptor fails on this workload as on the other, at every preference, which
-is a second confirmation of the inversion in \S\ref{sec:policy}. Where a model
-is weak enough that most queries are unanswerable at any rung, there is little
-for any per-query policy to allocate.
+\textbf{The failure hands us the missing precondition.} Algorithm~3 locates
+where a \emph{model-corpus pair} stops paying, and that is a corpus property
+only when the model is strong enough on the corpus for legibility to bind
+before capacity does. We add that as step~0: before reading a null as a
+ceiling, check that at least one model reaching a substantially higher accuracy
+agrees with it, or report the ceiling as specific to the pair. The DocVQA
+ceiling passes this test, since the $500$M model at $0.748$ and Qwen at
+$0.892$ agree on it. The InfographicVQA measurement fails it, and would have
+been published as a corpus ceiling had we not run the second model. The cost of
+the check is one additional model on the corpus, which is what the rest of this
+paper spends on every claim it makes twice.
 
 \paragraph{The ladder rule finds the ceiling on its own.} Given rungs and
 prices, Eq.~\ref{eq:ladder} selects the top rung on $0$ to $6\%$ of queries
@@ -2350,6 +2924,22 @@ how much of the escalation value your traffic explains with free metadata; if
 most of it, route on the metadata and spend the engineering on the ladder; if
 little, read the model and give it graded actions.
 
+
+\paragraph{A diagnostic, offered as an ordering test.} The practical question a
+reader faces is which regime their traffic is in, and our measurements supply a
+candidate test that costs nothing: score raw image size against the escalation
+gain on a sample of the traffic, using the labels the sample already carries.
+It reaches $0.748$ on our heterogeneous mixture and $0.508$, $0.508$ and
+$0.533$ on the three single workloads, so a free descriptor that ranks near
+chance is a sign that the between-domain axis is absent and that whatever value
+remains has to be read from the model. Four points do not establish a
+threshold, and traffic of intermediate heterogeneity is exactly what we have
+not collected, so this is an ordering test rather than a calibrated cut, and
+calibrating it would need mixtures sampled between our two extremes. It is
+cheap enough to
+run before committing to an architecture, which is the property that makes it
+worth stating at all.
+
 \paragraph{Status of each claim.} Table~\ref{tab:status} separates what the
 evidence supports at three different strengths, since the paper's claims are
 not all of one kind.
@@ -2371,14 +2961,15 @@ A free image descriptor matches the probe &
 measured on one mixture; untested on traffic where size and content decouple \\
 \addlinespace
 The two regimes require opposite signals &
-the free descriptor fails on both workloads measured; the graded ladder clears
-on the one where the model is strong, marginally on the other \\
+the free descriptor fails on all three workloads; the model-read signal clears
+with surviving significance on two of them \\
 \addlinespace
 The probe's pooled advantage is a domain effect &
 measured three ways; the magnitude within a domain is uncertain \\
 \addlinespace
 Accuracy saturates by $1152$\,px &
-measured on two document corpora and five models; untested outside document QA \\
+established on DocVQA over four models including one at $0.892$; not established
+on our second corpus, where the ceiling is above our rungs \\
 \addlinespace
 Pixels bind and tokens do not &
 measured on the one model whose two axes move separately; not decomposed for the other four \\
@@ -2386,9 +2977,9 @@ measured on the one model whose two axes move separately; not decomposed for the
 The ceiling bounds any model's need from above &
 observed on five models, one counterexample would refute it \\
 \addlinespace
-The ladder pays where rungs are distinct &
-measured on DocVQA; one preference of four on InfographicVQA; null where no top
-rung exists \\
+Graded actions add value beyond the signal &
+measured on DocVQA only; on ChartQA the corpus supports one rung and the two
+rules coincide \\
 \addlinespace
 Escalation value is domain-determined &
 observed across four datasets, assumed to extend to unseen ones \\
@@ -2410,16 +3001,16 @@ ceiling is the claim we have pushed hardest, over an $8.6\times$ parameter
 range, three vision-encoder mechanisms and two lineages. It held across four of
 the five and moved down a rung on the fifth, the one whose token budget does
 not follow its input resolution, which is why we state it as a bound rather
-than a constant. It was measured on two corpora, DocVQA and InfographicVQA,
-which stop paying at the same pixel target while spending a factor of two apart
-in visual tokens to reach it. Both are document-QA, so the claim we are
-entitled to is that document pages of this kind have a legibility ceiling near
-$1152$\,px that bounds every model's useful resolution from above and that
-Algorithm~3 locates in about $300$ pages. We predicted that the denser of the
-two would place the ceiling higher and it did not, which is reported in
-\S\ref{sec:ladder} rather than removed. A corpus of genuinely finer print, or
-of a different medium, remains untested, and the procedure rather than the
-number is what we claim transfers. The mechanism behind the ceiling is settled only on the model that lets both
+than a constant. It is established on one corpus, DocVQA, where four models
+spanning $8.6\times$ parameters agree on $1152$\,px and the strongest of them
+reads the corpus to $0.892$, so legibility rather than capacity is what binds.
+On our second corpus it is not established: the $500$M model's null there is
+its own capacity, and a stronger model keeps gaining past our highest rung, so
+InfographicVQA's ceiling lies above $2048$\,px and we have not located it. That
+failure is reported in \S\ref{sec:ladder} because it supplies the precondition
+Algorithm~3 lacked, and because we would have published the weak model's null
+as a corpus property had we not run the second. What we claim transfers is the
+procedure, now including that precondition, rather than the number. The mechanism behind the ceiling is settled only on the model that lets both
 axes be moved separately. There, pixels at fixed tokens buy $+0.108$ over one
 rung and tokens at fixed pixels buy $+0.024$ with an interval spanning zero. We
 do not claim the same decomposition for the four models whose tokeniser follows
@@ -2448,16 +3039,23 @@ so part of what transfers may be encoder-side rather than genuinely
 cross-model; separating those requires a source model with a different encoder.
 
 We ask many questions of one dataset mixture, so the intervals above are
-corrected rather than nominal. Sixty-three paired comparisons at the nominal
-$5\%$ level carry a $96\%$ chance of at least one false positive, so we convert
+corrected rather than nominal. Two hundred and twenty-six paired
+comparisons at the nominal $5\%$ level make at least one false positive close
+to certain, so we convert
 each bootstrap to a two-sided p-value and run Holm's step-down over the whole
-family. Every comparison carries its own resample vector, so all sixty-three
-are scored by the same bootstrap rather than by an approximation to a reported
+family. Every comparison carries its own resample vector, so all of them are
+scored by the same bootstrap rather than by an approximation to a reported
 interval.
 
-Forty-seven of the sixty-three clear the nominal level and thirty-nine survive
-the step-down. Eight claims are lost, and they are worth naming individually
-because four of them are convenient for our thesis. The probe's AUROC advantage
+One hundred and sixty-three of the two hundred and twenty-six clear the
+nominal level and one hundred and thirty-nine survive the step-down. Twenty-four claims
+are lost, and they are worth naming individually because six of them are
+convenient for our thesis. Five of the twenty-four are loopholes we measured
+against ourselves: the graded cost-only slack adjusts out on four of the eight
+pairs and the binary one on a fifth, so on those pairs the comparator has no
+measurable gap at all and the clearances there stand on firmer ground than the
+correction elsewhere costs us. That is worth stating plainly, because the
+correction is usually reported as what a paper loses. The probe's AUROC advantage
 on the recovery target adjusts from $p = 0.041$ to $0.662$. Two preferences at
 which the probe nominally beats the free image descriptor adjust to $0.612$ and
 $0.426$, which makes the two signals harder to distinguish rather than easier.
@@ -2465,11 +3063,13 @@ Two of the points at which the free descriptor sits \emph{below} the hull
 inside one workload adjust to $0.130$ and $0.372$, which weakens that row to
 indistinguishable from the hull rather than worse than it: the correct reading
 is that the descriptor buys nothing there, not that it is harmful. Both readings of the harmful top step in the
-tile-budget control adjust to $0.745$ and $0.722$. And the second corpus's
-weakest rung gain, $+0.052$ from $384$ to $768$\,px on InfographicVQA, adjusts
-to $0.331$; the step that sets that corpus's ceiling, $+0.086$ from $768$ to
+tile-budget control adjust to $0.745$ and $0.722$. The second corpus's weakest
+rung gain, $+0.052$ from $384$ to $768$\,px on InfographicVQA, adjusts to
+$0.331$; the step that sets that corpus's ceiling, $+0.086$ from $768$ to
 $1152$\,px, survives, so the ceiling determination does not depend on the lost
-one. Every cost comparison survives, as do the pixel-axis gains, the
+one. And the single nominal clearance of the hull on InfographicVQA adjusts
+from $0.004$ to $0.108$, which is why \S\ref{sec:ladder} states the positive
+half of the inversion on two workloads rather than three. Every cost comparison survives, as do the pixel-axis gains, the
 domain-identity bound, the free descriptor's clearance of the hull at every
 operating point of both costings, and the entropy ladder's clearance inside the
 DocVQA workload. We keep the eight in the paper as observations and no longer
@@ -2504,10 +3104,11 @@ dataset is not it. We report the confound as established and its magnitude as
 uncertain.
 
 \section{Reproducibility}
+\label{sec:reproducibility}
 
 Every numeric claim in this paper is re-derived from the run records by a
 validation harness with an explicit threshold per claim, which exits non-zero if
-any stops holding; it currently checks sixty-eight, including the negative
+any stops holding; it currently checks seventy-seven, including the negative
 results on localization, on our own energy instrument, and on the universality
 of Pareto dominance, that last one asserts the claim is \emph{not} universal,
 so restating it too strongly fails the build. Claims stated in the text and
@@ -2525,7 +3126,13 @@ $56\%$ of the mixture's full-resolution passes were not distinct configurations
 the single-domain pilot was designed to remove.
 
 \paragraph{Compute.} Every experiment in this paper runs on one RTX 4060 laptop
-GPU with $8.6$\,GB of memory. The oracle runs comprise $54\,660$
+GPU with $8.6$\,GB of memory. Whether the component shares of
+\S\ref{sec:cost} hold on the embedded hardware this line of work targets is
+something one GPU cannot settle; Amanzhol and Park~\cite{vitenergy} measure
+vision-transformer inference on both a Jetson TX2 and a mobile GPU and report
+rankings that differ between the two devices, which is the reason we state our
+cost model as measured on our hardware rather than as a property of the
+architectures. The oracle runs comprise $54\,660$
 instrumented generations totalling $305$ minutes of measured model time, of
 which the $1200$-page single-domain pilot is $6\,000$ generations per serving
 model, $40$ minutes each for the two SmolVLM models and $54$ for SmolVLM2-2.2B; activation extraction and the component profiles add roughly a further
@@ -2551,11 +3158,12 @@ training data narrows that gap without closing it. What the direction mostly
 encodes is which \emph{kind} of image is present: a quantity that predicts
 escalation value across a benchmark mixture, because the mixture's datasets
 differ enormously in how much resolution buys, and predicts much less within
-one. Raw image size, free to read, carries the same information: built into a
-policy and priced, it clears the randomisation hull at every operating point of
-either costing and stays within $0.010$ of the probe at every operator
-preference. A policy handed the dataset label and escalating at random within
-each dataset dominates both, which places an upper bound on the whole exercise:
+one. Raw image size, free to read, carries much of the same information: built
+into a policy and priced, it clears the randomisation hull at every operating
+point of either costing on the $500$M model and stays within $0.010$ of the
+probe there, though on a $256$M model the probe keeps an advantage at tight
+budgets. A policy handed the dataset label and escalating at random within each
+dataset dominates both, which places an upper bound on the whole exercise:
 on mixed traffic, the adaptive gain available is the gain from knowing which
 benchmark is being served.
 
@@ -2563,9 +3171,13 @@ Three things bound the claim rather than one. This is a way of deciding
 \emph{whether} to look again and not \emph{where}; on the evidence here it is a
 way of deciding for a heterogeneous mixture and not for a workload; and on a
 mixture it is not a way that needs the model's activations at all. Inside a
-workload the same measurement inverts: the free descriptor falls to chance and
-only a model-read signal on a graded action space clears the no-signal
-baseline. Neither regime is the general case, which is the result we would put
+workload the ranking inverts: the free descriptor becomes the weaker value
+ranker on all eight corpus-model pairs, and a model-read signal on a graded
+action space clears the no-signal baseline on five of them. The descriptor's
+policy still clears where the serving model prices resolution steeply, about
+half of it by allocating budget rather than by ranking anything, which is a
+property of the comparator we measured rather than a capability of the
+descriptor. Neither regime is the general case, which is the result we would put
 first.
 
 What we would keep is the part that did not depend on the probe. The decision
@@ -2581,7 +3193,8 @@ that ceiling is the most any model needs rather than what each one needs.
 The comparison that decides whether any of this matters is against randomising
 between fixed configurations, which needs no signal. The standard entropy
 threshold never clears that bar on our mixture; the probe clears it only because
-it is read mid-prefill; the ladder clears it on homogeneous traffic. Where a
+it is read mid-prefill; the ladder clears it on homogeneous traffic, by margins
+that survive the largest gap a policy reading only cost can reach. Where a
 single fixed rung fits the budget, pinning it at the corpus's measured
 saturation point is the right policy, and per-query routing is for the traffic
 no single rung fits. Both need the ceiling measured rather than guessed, which
@@ -2769,18 +3382,19 @@ at a fixed latency budget (Table~\ref{tab:ablation}).
 \begin{table}[t]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{lcc}
 \toprule
 variant & acc.\ at $400$\,ms & acc.\ at $500$\,ms \\
 \midrule
 \textbf{reference} & $\mathbf{0.653}$ & $\mathbf{0.743}$ \\
-no per-example pricing & $0.650\ (-0.003)$ & $0.744\ (+0.0004)$ \\
+no per-example pricing & $0.650\ (-0.003)$ & $0.744\ (+0.000)$ \\
 no calibration (tuned rate) & $0.431\ (-0.221)$ & $0.571\ (-0.172)$ \\
 no ladder (binary) & $0.281\ (-0.372)$ & $0.622\ (-0.121)$ \\
 no gain target (UCCI) & $0.278\ (-0.375)$ & $0.611\ (-0.133)$ \\
 no signal (fixed policy) & $0.278\ (-0.375)$ & $0.278\ (-0.465)$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \caption{Each variant swept over six operator preferences and read at a fixed
 budget, $1200$ DocVQA pages, $30$ resamples. Deltas are paired against the
 reference frontier.}
@@ -2987,6 +3601,10 @@ on the cost-derived rule when a preference can be stated.
 \bibitem{cascadefail} Z.~Sun, D.~Chen and S.~Li. When Efficiency Backfires: Cascading LLMs Trigger Cascade Failure under Adversarial Attack. arXiv:2605.17288, 2026.
 \bibitem{vlcache} S.~Qin, H.~Yu, C.~Wu, Z.~Li et al. (Qwen Team, Alibaba). VLCache: Computing 2\% Vision Tokens and Reusing 98\% for Vision-Language Inference. arXiv:2512.12977v2, 2025.
 \bibitem{abstention} N.~Madhusudhan, V.~Yadav and A.~Lacoste (ServiceNow Research). Knowing When Not to Answer: Evaluating Abstention in Multimodal Reasoning Systems. arXiv:2604.14799, 2026.
+\bibitem{knowingbefore} A.~Afzal, F.~Matthes, G.~Chechik and Y.~Ziser. Knowing Before Saying: LLM Representations Encode Information About Chain-of-Thought Success Before Completion. arXiv:2505.24362v2, 2025.
+\bibitem{asciiart} Z.~Wang, B.~Hooi, Y.~Wang, M.-H.~Yang, Z.~Huang and Y.~Cai. Text Speaks Louder than Vision: ASCII Art Reveals Textual Biases in Vision-Language Models. arXiv:2504.01589v2, 2025.
+\bibitem{cachedattention} B.~Gao, Z.~He, P.~Sharma, Q.~Kang, D.~Jevdjic, J.~Deng, X.~Yang, Z.~Yu and P.~Zuo. Cost-Efficient Large Language Model Serving for Multi-turn Conversations with CachedAttention. arXiv:2403.19708v3, 2024.
+\bibitem{vitenergy} N.~Amanzhol and J.-G.~Park. Energy-Efficient Vision Transformer Inference for Edge-AI Deployment. arXiv:2511.23166v1, 2025.
 \bibitem{recoverr} T.~Srinivasan, J.~Hessel, T.~Gupta, B.~Y.~Lin, Y.~Choi, J.~Thomason and K.~R.~Chandu. Selective ``Selective Prediction'': Reducing Unnecessary Abstention in Vision-Language Reasoning. arXiv:2402.15610, 2024.
 \end{thebibliography}
 

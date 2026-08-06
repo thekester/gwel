@@ -65,9 +65,12 @@ python scripts/make_qualitative_figure.py # the escalation taxonomy on real page
 python scripts/ceiling_sample_size.py    # how many pages locate a corpus ceiling?
 python scripts/analyze_fixed_budget.py   # pixels or tokens? one model separates them
 python scripts/baseline_free_signal.py   # does a free header read beat the probe?
+python scripts/baseline_free_signal.py --config configs/serve256.yaml --activations results/activations_serve256.npz
 python scripts/free_signal_single_domain.py  # and does it still, inside one workload?
-python scripts/compare_corpora.py        # Algorithm 3 on a corpus it has not seen
+python scripts/compare_corpora.py        # is a top-step null the corpus, or the model?
+python scripts/free_signal_single_domain.py --config configs/chartqa500.yaml --rungs lowres_768
 python scripts/oracle_domain_policy.py   # what is knowing the dataset worth?
+python scripts/size_content_confound.py  # is image size a signal or a detector?
 python scripts/tile_budget_ladder.py     # the token axis, with pixels held fixed
 python scripts/analyze_tile_budget.py    # read by tokens spent, not by config name
 python scripts/make_figure_data.py        # pgfplots coordinates for the paper figures

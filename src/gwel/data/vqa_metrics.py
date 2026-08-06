@@ -129,3 +129,38 @@ def vqa_accuracy(prediction: str, gold_answers: list[str] | tuple[str, ...]) -> 
     if len(gold_answers) < 3:
         return 1.0 if matches > 0 else 0.0
     return min(matches / 3.0, 1.0)
+
+
+def _as_number(text: str) -> float | None:
+    """Parse a numeric answer, tolerating the separators charts carry."""
+    cleaned = text.strip().replace(",", "").replace("%", "").replace("$", "")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def relaxed_accuracy(
+    prediction: str,
+    gold_answers: list[str] | tuple[str, ...],
+    tolerance: float = 0.05,
+) -> float:
+    """ChartQA's metric: numeric answers within ``tolerance``, else exact match.
+
+    A predicted number counts when it lands within a relative tolerance of the
+    gold number, which is what the benchmark specifies for chart reading, where
+    the answer is often read off an axis. Everything else falls back to the
+    normalised exact match used elsewhere in this module.
+    """
+    predicted = _as_number(prediction)
+    for gold in gold_answers:
+        target = _as_number(str(gold))
+        if predicted is not None and target is not None:
+            if target == 0.0:
+                if predicted == 0.0:
+                    return 1.0
+            elif abs(predicted - target) / abs(target) <= tolerance:
+                return 1.0
+        elif normalize_answer(prediction) == normalize_answer(str(gold)):
+            return 1.0
+    return 0.0

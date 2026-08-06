@@ -44,7 +44,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/docvqa1200.yaml")
     parser.add_argument("--out", default="results/free_signal_docvqa.json")
+    parser.add_argument(
+        "--rungs",
+        nargs="*",
+        default=list(RUNGS),
+        help="rungs above the cheap pass; pass only the ones step 3 of "
+             "Algorithm 3 keeps, since a duplicate rung prices nothing",
+    )
     args = parser.parse_args()
+    rungs = tuple(args.rungs)
 
     config = load_config(args.config)
     grouped: dict[str, dict] = defaultdict(dict)
@@ -54,12 +62,12 @@ def main() -> None:
         grouped[row.example_id][row.config_id] = row
     ids = [
         e for e in grouped
-        if all(c in grouped[e] for c in (CHEAP, *RUNGS)) and grouped[e][CHEAP].signals
+        if all(c in grouped[e] for c in (CHEAP, *rungs)) and grouped[e][CHEAP].signals
     ]
-    ok = {c: np.array([grouped[e][c].correct for e in ids]) for c in (CHEAP, *RUNGS)}
+    ok = {c: np.array([grouped[e][c].correct for e in ids]) for c in (CHEAP, *rungs)}
     tok = {
         c: np.array([grouped[e][c].visual_tokens for e in ids], float)
-        for c in (CHEAP, *RUNGS)
+        for c in (CHEAP, *rungs)
     }
     entropy = np.array(
         [float(grouped[e][CHEAP].signals["mean_entropy"]) for e in ids]
@@ -78,10 +86,30 @@ def main() -> None:
             by[int(row.visual_tokens)].append(row.latency_ms)
     good = [t for t in sorted(by) if len(by[t]) >= MIN_BUCKET]
     model = fit_token_cost(good, [float(np.median(by[t])) for t in good])
-    ms = {c: model.predict(tok[c]) for c in (CHEAP, *RUNGS)}
-    gains = {r: signed_gain(ok[CHEAP], ok[r]) for r in RUNGS}
-    deltas = np.column_stack([ms[r] - ms[CHEAP] for r in RUNGS])
-    top_gain = signed_gain(ok[CHEAP], ok["full"])
+    # The affine token-cost model is verified on SmolVLM, where its worst
+    # residual is 1.7 ms. It is not a law: a model whose latency is
+    # super-linear in tokens, or which pages memory at the top rung, breaks it
+    # badly enough to predict negative costs. Refuse the fit in that case and
+    # price each pass by what it actually took, rather than reporting a hull
+    # comparison built on impossible latencies.
+    reference = float(np.median([grouped[e][rungs[-1]].latency_ms for e in ids]))
+    fit_usable = model.base_ms > 0.0 and model.residual_ms <= 0.2 * reference
+    if fit_usable:
+        ms = {c: model.predict(tok[c]) for c in (CHEAP, *rungs)}
+    else:
+        print(
+            f"token-cost fit rejected ({model.base_ms:.0f} + "
+            f"{model.slope_ms_per_token:.3f}v, worst residual "
+            f"{model.residual_ms:.0f} ms against a {reference:.0f} ms top rung): "
+            f"pricing each pass by its measured latency instead"
+        )
+        ms = {
+            c: np.array([grouped[e][c].latency_ms for e in ids], float)
+            for c in (CHEAP, *rungs)
+        }
+    gains = {r: signed_gain(ok[CHEAP], ok[r]) for r in rungs}
+    deltas = np.column_stack([ms[r] - ms[CHEAP] for r in rungs])
+    top_gain = signed_gain(ok[CHEAP], ok[rungs[-1]])
 
     print(f"n = {len(ids)} pages, longest edge {size.min():.0f} to {size.max():.0f} px")
     print(
@@ -91,25 +119,37 @@ def main() -> None:
         f"{auroc(entropy.tolist(), [bool(g > 0) for g in top_gain]):.3f}"
     )
 
+    # The held-out fold is fixed at 300 wherever the corpus can spare a
+    # training fold of at least 50; below that it splits in half instead. A
+    # hardcoded 300 silently empties the training fold on a corpus of fewer
+    # than 300 usable pages, which fails inside the calibrator rather than at
+    # the split. Corpora large enough keep the published protocol unchanged.
+    heldout = HELDOUT if len(ids) - HELDOUT >= 50 else max(50, len(ids) // 2)
+    if heldout != HELDOUT:
+        print(
+            f"held-out fold reduced to {heldout} of {len(ids)}: the corpus "
+            f"cannot spare {HELDOUT} and leave a usable training fold"
+        )
+
     rows: dict[str, list] = defaultdict(list)
     for seed in range(RESAMPLES):
         rng = np.random.default_rng(13000 + seed)
         order = rng.permutation(len(ids))
-        test, train = order[:HELDOUT], order[HELDOUT:]
+        test, train = order[:heldout], order[heldout:]
         fixed = [
             (float(ms[c][test].mean()), float(ok[c][test].mean()))
-            for c in (CHEAP, *RUNGS)
+            for c in (CHEAP, *rungs)
         ]
         for name, signal in (("entropy", entropy), ("image size", size)):
             for value in VALUES:
                 chosen = fit_ladder_rule(
                     signal[train],
-                    {r: gains[r][train] for r in RUNGS},
+                    {r: gains[r][train] for r in rungs},
                     value_ms_per_correct=value,
                 ).choose(signal[test], deltas[test])
                 accuracy = np.where(chosen < 0, ok[CHEAP][test], 0.0)
                 latency = np.where(chosen < 0, ms[CHEAP][test], 0.0)
-                for level, rung in enumerate(RUNGS):
+                for level, rung in enumerate(rungs):
                     mask = chosen == level
                     accuracy = np.where(mask, ok[rung][test], accuracy)
                     latency = np.where(mask, ms[rung][test], latency)
@@ -117,13 +157,13 @@ def main() -> None:
 
                 fires = fit_gain_rule(
                     signal[train], top_gain[train],
-                    delta_ms=float((ms["full"] - ms[CHEAP]).mean()),
+                    delta_ms=float((ms[rungs[-1]] - ms[CHEAP]).mean()),
                     value_ms_per_correct=value,
                 ).escalate(signal[test])
                 record(
                     rows, f"binary, {name}", value,
-                    np.where(fires, ok["full"][test], ok[CHEAP][test]),
-                    np.where(fires, ms["full"][test], ms[CHEAP][test]),
+                    np.where(fires, ok[rungs[-1]][test], ok[CHEAP][test]),
+                    np.where(fires, ms[rungs[-1]][test], ms[CHEAP][test]),
                     fixed,
                 )
 

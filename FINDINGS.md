@@ -20,7 +20,7 @@ intervals. Forty examples is small: read the direction, not the third digit.
 
 > **Every claim below is checked by `scripts/validate_claims.py`**, which
 > re-derives it from the data with an explicit threshold and fails loudly if it
-> stops holding. Current state: 68 checks, 68 passing. Claims that are stated
+> stops holding. Current state: 74 checks, 74 passing. Claims that are stated
 > here but *not* covered by a check should be treated as unverified.
 
 > **A Pareto-dominance claim made elsewhere in this repository was
@@ -45,12 +45,14 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > rung repairs 49.9%, and 13.0% fail at every rung including full resolution.
 > See `ANGLES.md` §0-figures, checks Q1-Q2.
 
-> **Two corpora share a pixel ceiling and spend twice as differently to reach
-> it, and a stated prediction failed.** We predicted a denser corpus would place
-> the ceiling above DocVQA's 1152 px. InfographicVQA stops at the same target,
-> spending 320 visual tokens there against DocVQA's 640, exactly 2.00x apart.
-> With the 2.05x spread across models, a token budget cannot be what runs out.
-> See `ANGLES.md` §0-corpus2, check R14.
+> **WITHDRAWN, by our own second model: the two corpora do not share a
+> ceiling.** We reported that InfographicVQA stops paying at 1152 px like
+> DocVQA. Qwen2-VL-2B on the same pages is still gaining +0.070 [+0.032, +0.110]
+> at the top rung, so the 500M model's null there was capacity and not
+> legibility. The DocVQA ceiling stands, agreed by four models including one at
+> 0.892 accuracy. Algorithm 3 gained step 0 as a result: a top-step null is a
+> corpus property only when a materially stronger model agrees. See `ANGLES.md`
+> §0-capacity, check R14.
 
 > **The corpus ceiling is an upper bound, not a constant.** It transports
 > across four models spanning 8.6x parameters, two lineages and three
@@ -72,6 +74,47 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > the full 1200 on 93% of draws, and 100 pages on 47%. See `ANGLES.md`
 > §0-procedure, check R11, Algorithm 3 in the paper.
 
+> **The inversion holds on three workloads, and Algorithm 3's duplicate-rung
+> guard fires on an unseen corpus.** ChartQA charts are 800 px on median, so two
+> of the four pixel targets are duplicates (2% and 0% of pages distinct) and the
+> procedure discards them. On the surviving rung, entropy clears the hull at all
+> four preferences (+0.012 to +0.032, all surviving Holm) and image size does
+> not. Across the three workloads the free descriptor scores 0.508, 0.508 and
+> 0.533 on the escalation gain. See `ANGLES.md` §0-chartqa, check CV5.
+
+> **A hull gap certifies information about cost and correctness jointly, not
+> about correctness.** Proposition 2 makes that precise. Written after the
+> exception it explains, it implied an unmeasured cost correlation that could
+> have come out flat. A third model run as a stated prediction confirmed the
+> correlation half (−0.099 as predicted) and showed the other half untestable
+> there: its full pass costs exactly what its cheap pass costs (1.00x), so the
+> hull is degenerate. Hull comparisons now report the cost spread and exclude
+> anything below 1.5x. Widened to every collected pair, the account splits five
+> comparable ones cleanly: the three pricing resolution shallowly clear nothing,
+> the two pricing it steeply clear everywhere, all at chance on the gain. One of
+> the five, Qwen2-VL-2B, was predicted to clear before being measured and does.
+> Measured: SmolVLM-500M has Spearman(size, extra cost) +0.083 and clears 0/4;
+> LLaVA-OneVision-0.5B has +0.336 and clears 4/4, both at chance on the gain
+> (0.508, 0.518). See `ANGLES.md` §0-prop2, check CV10.
+
+> **The cell crossing both axes refutes the correlation account and the ordering
+> claim.** ChartQA read by LLaVA-OneVision: the free descriptor clears 3/4 at
+> ρ=+0.151 while a pair at +0.142 clears nothing, so cost *spread* is what
+> orders the six cells, not correlation. And there entropy clears 0/4 while the
+> free descriptor clears 3/4, because escalation repairs 12% and damages 5% for
+> 53x the price, so a calibrated rule correctly declines. The hull is built on
+> mean costs, so a policy correlated with per-example cost escapes it without
+> reading value. The ordering claim is retracted. See `ANGLES.md` §0-crossed,
+> check CV10.
+
+> **Inside a workload the free descriptor ranks at chance, but its policy can
+> still pay by allocating cost.** On a fourth sub-billion model from a third
+> lineage (LLaVA-OneVision-0.5B) it scores 0.518 on the escalation target
+> against entropy's 0.731, yet its ladder clears the hull at 3 preferences of 4,
+> because that model's anyres tiling makes escalation price rise steeply with
+> page size. The ordering survives: entropy beats it by +0.025 [+0.020, +0.030]
+> at the loosest preference. See `ANGLES.md` §0-llavaov, check CV9.
+
 > **Which signal pays is a property of the traffic, and the two regimes
 > invert.** Across the mixture the free image descriptor clears the hull and
 > entropy never does. Inside DocVQA image size falls to 0.508 AUROC and clears
@@ -79,6 +122,29 @@ intervals. Forty examples is small: read the direction, not the third digit.
 > binary escalation fails with either signal. A method evaluated only on a
 > mixture will recommend the wrong signal for a workload. See `ANGLES.md`
 > §0-tworegimes, check CV4.
+
+> **The cascade correction matters more as the model gets weaker.** Replicated
+> on SmolVLM-256M: at V=800 the correctness rule escalates 100% of queries
+> against the gain rule's 58%, where on the 500M it is 54% against 34%. The gain
+> rule is 43.2 [36.5, 50.4] ms cheaper at an accuracy difference spanning zero.
+> A weaker cheap pass raises P(cheap wrong) almost everywhere while the
+> recoverable share is unchanged, so a rule thresholding the first saturates.
+> See `ANGLES.md` §0-scale, check CV7.
+
+> **Image size is a provenance detector, not an escalation signal.** Inside a
+> stratum where size varies (1024 to 1936 px, n=288, sd 230) and provenance is
+> mixed, it predicts the source dataset at 0.976 and the escalation gain at
+> 0.579, while escalation value still spans 36% to 13% across sources there. Its
+> pooled 0.730 comes from separating benchmarks that differ in value. Traffic
+> where size and provenance decouple should not expect it to route. See
+> `ANGLES.md` §0-detector, check CV8.
+
+> **The free-descriptor equivalence is the 500M model's, not the regime's.**
+> Repeated on SmolVLM-256M over the same 1000 images: entropy still never clears
+> the hull and randomising with the abort still buys nothing, but under
+> per-example prices the free descriptor clears at no preference while the probe
+> still clears at the two tightest, beating it by 0.019 [0.014, 0.024] at V=400.
+> The paper now states the equivalence as model-specific. See check CV6.
 
 > **A signal that costs nothing matches the probe, and dataset identity bounds
 > both.** Routing on raw image size clears the randomisation hull at every
@@ -409,3 +475,51 @@ on the earlier pilot.
    signal. Rebalancing toward document and fine-detail questions would sharpen
    every routing result here; keeping VQAv2 is defensible only as a check that
    a router does not escalate when it should not.
+
+## The comparator's slack, measured (2026-08-06)
+
+The randomisation hull is built from the mean cost of each fixed configuration,
+so a policy that escalates the cheapest queries clears it without reading
+anything about which would benefit. We measured that, per corpus-model pair,
+in both action spaces (`scripts/cost_only_baseline.py`,
+`scripts/cost_only_graded.py`).
+
+| corpus, serving model | spread | binary | graded | entropy | free |
+|---|---|---|---|---|---|
+| InfoVQA, SmolVLM-500M | 1.6x | -0.004 | -0.011 | +0.006 | -0.004 |
+| DocVQA, SmolVLM-256M | 2.0x | -0.028 | +0.004 | +0.023 | -0.001 |
+| DocVQA, SmolVLM-500M | 2.3x | -0.049 | +0.003 | +0.041 | +0.000 |
+| DocVQA, SmolVLM2-2.2B | 5.4x | -0.036 | +0.003 | +0.040 | +0.005 |
+| InfoVQA, Qwen2-VL-2B | 16.3x | +0.030 | **+0.054** | +0.043 | +0.018 |
+| DocVQA, Qwen2-VL-2B | 41.1x | -0.020 | +0.008 | +0.075 | +0.018 |
+| ChartQA, LLaVA-OV-0.5B | 53.4x | -0.008 | +0.001 | -0.000 | +0.010 |
+| DocVQA, LLaVA-OV-0.5B | 77.4x | -0.011 | +0.007 | +0.038 | +0.013 |
+
+**The hull is a nearly tight floor on seven of eight pairs.** Binary cost-only
+sits below it everywhere but one; graded cost-only peaks at +0.008 outside the
+exception, and under Holm four of the eight graded slacks adjust out entirely.
+Every clearance on those seven survives its own slack.
+
+**The exception costs us a pair.** On InfographicVQA read by Qwen2-VL-2B the
+graded slack is +0.054, above both our entropy ladder (+0.043) and the free
+descriptor (+0.018), so neither clearance there is attributable. It is the
+corpus where that model keeps gaining past our highest rung, so buying more
+escalations pays without knowing which ones.
+
+**A methodological trap, which we fell into first.** The first version ordered
+by *measured* escalation latency and reported slacks up to +0.053, enough to
+withdraw two results. Artefact. Passes are timed once, 18.1% of SmolVLM
+first-step latencies come out non-positive, and sorting on that measurement
+selects favourable noise: escalating the cheapest tenth, selection by measured
+latency reports 93 ms for +0.517 accuracy against 188 ms for +0.400 by
+predicted tokens. Ordering by visual-token count, deterministic and available
+before the decision, removes the channel. Guarded by CV13.
+
+**The price axis is now filled.** SmolVLM2-2.2B (5.4x) and Qwen2-VL-2B on
+InfoVQA (16.3x) were already collected and interpolate the 2.3x-to-41.1x void
+the threshold claim sat in. Over eight pairs the descriptor's clearances rise
+monotonically with spread, rho=0.914, p=0.0015. Guarded by CV10.
+
+Cost allocation explains 46% and 54% of the descriptor's gap on the two steep
+DocVQA pairs and 9% on the crossed cell. The remainder is unexplained; the
+descriptor's AUROC on the escalation target is 0.508 to 0.586 over all eight.

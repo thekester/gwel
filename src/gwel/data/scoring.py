@@ -10,7 +10,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 
 from ..oracle.records import RunRecord
-from .vqa_metrics import anls, exact_match, vqa_accuracy
+from .vqa_metrics import anls, exact_match, relaxed_accuracy, vqa_accuracy
 
 #: Metric name per dataset; datasets not listed fall back to ``default_metric``.
 DATASET_METRICS: dict[str, str] = {
@@ -18,6 +18,7 @@ DATASET_METRICS: dict[str, str] = {
     "textvqa": "vqa",
     "docvqa": "anls",
     "infographicvqa": "anls",
+    "chartqa": "relaxed",
     "vstar": "exact",
 }
 
@@ -42,6 +43,8 @@ class ScoringPolicy:
             return vqa_accuracy(prediction, list(gold_answers))
         if metric == "anls":
             return anls(prediction, list(gold_answers), threshold=self.anls_threshold)
+        if metric == "relaxed":
+            return relaxed_accuracy(prediction, list(gold_answers))
         if metric == "exact":
             return 1.0 if exact_match(prediction, list(gold_answers)) else 0.0
         raise ValueError(f"unknown metric {metric!r} for dataset {dataset!r}")

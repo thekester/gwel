@@ -1,0 +1,82 @@
+# InfographicVQA, read by a much stronger model.
+#
+# The ceiling on this corpus was measured with SmolVLM-500M, which answers only
+# 0.368 of it at that ceiling. A null at the top step is then equally
+# consistent with the pages being legible at 1152 px and with the model running
+# out of capacity, which is the alternative the DocVQA ceiling spends five
+# models ruling out. This run rules it out here with one: Qwen2-VL-2B reads
+# these pages far better and tokenises by a wholly different mechanism.
+#
+# If the ceiling stays at 1152 px with substantially higher accuracy, capacity
+# is not what produced the null. If it moves up, the corpus needs rungs above
+# 2048 px and the SmolVLM measurement was capacity-limited after all.
+
+model:
+  model_id: Qwen/Qwen2-VL-2B-Instruct
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/infovqa500
+  pilot_manifest: data/processed/infovqa500/manifest.jsonl
+  records: results/runs/infovqa500_qwen2b_records.jsonl
+  labels: results/runs/infovqa500_qwen2b_labels.jsonl
+  router_dir: results/router-infovqa500-qwen2b
+
+runner:
+  lowres_sizes: [384, 768, 1152]
+  full_longest_side: 2048
+  # The resolution ladder only; crops and OCR are not read by this study.
+  include_crop: false
+  include_ocr: false
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: false
+    region_longest_side: 768
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005
+  lambda_energy_per_mj: 0.000002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 120
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 5000
+  image_dir: data/processed/infovqa500/images
+  per_dataset:
+    infographicvqa: 500

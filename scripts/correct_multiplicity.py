@@ -251,14 +251,33 @@ def review_tests() -> list[tuple[str, list[float]]]:
             if key.endswith("vector"):
                 add(f"CV2 free signal minus probe, {costing}, {key[:-7]}", row)
 
+    if Path("results/free_signal_256m.json").exists():
+        small = json.loads(Path("results/free_signal_256m.json").read_text())
+        for costing in ("flat", "per-example"):
+            for name, row in small[costing]["preference swept"].items():
+                if name.startswith(("image size", "probe")):
+                    add(f"CV6 256M hull gap, {costing}, {name}", row.get("gap_vector"))
+
     domain = json.loads(Path("results/domain_policy.json").read_text())
     for name, row in domain["policies"].items():
         if name.startswith("domain label"):
             add(f"CV3 domain label clears the hull, {name}", row.get("gap_vector"))
 
-    single = json.loads(Path("results/free_signal_docvqa.json").read_text())
-    for name, row in single.items():
-        add(f"CV4 single-domain hull gap, {name}", row.get("gap_vector"))
+    for label, path in (
+        ("DocVQA", "results/free_signal_docvqa.json"),
+        ("InfographicVQA", "results/free_signal_infovqa.json"),
+        ("ChartQA", "results/free_signal_chartqa.json"),
+        ("DocVQA 256M", "results/free_signal_docvqa_256m.json"),
+        ("DocVQA LLaVA-OV", "results/free_signal_llavaov.json"),
+        ("DocVQA Qwen2-VL-2B", "results/free_signal_qwen2b.json"),
+        ("ChartQA LLaVA-OV", "results/free_signal_chartqa_llavaov.json"),
+        ("DocVQA SmolVLM2-2.2B", "results/free_signal_docvqa_2b.json"),
+        ("InfoVQA Qwen2-VL-2B", "results/free_signal_infovqa_qwen2b.json"),
+    ):
+        if not Path(path).exists():
+            continue
+        for name, row in json.loads(Path(path).read_text()).items():
+            add(f"CV4 {label} hull gap, {name}", row.get("gap_vector"))
 
     tile = json.loads(Path("results/tile_budget_analysis.json").read_text())
     for step in tile["steps"]:
@@ -279,6 +298,17 @@ def review_tests() -> list[tuple[str, list[float]]]:
     budget = json.loads(Path("results/fixed_budget.json").read_text())
     for step in budget["steps"]:
         add(f"R12 fixed budget {step['from']} to {step['to']}", step.get("vector"))
+
+    # The comparator's own slack. These enter the family because the paper
+    # leans on two of them as retractions and on the rest as the bar its
+    # surviving gaps clear, which is evidentiary use either way.
+    for tag, slack_path in (
+        ("binary", Path("results/cost_only.json")),
+        ("graded", Path("results/cost_only_graded.json")),
+    ):
+        if slack_path.exists():
+            for label, row in json.loads(slack_path.read_text()).items():
+                add(f"CV12 cost-only slack, {tag}, {label}", row.get("gap_vector"))
 
     return tests
 

@@ -1,0 +1,96 @@
+# The third comparable point for the cost mechanism, and the one crossing that
+# crosses the model and corpus axes.
+#
+# Proposition 2's corollary rests on two serving models: SmolVLM-500M, whose
+# escalation cost barely tracks page size and whose free descriptor clears
+# nothing, and LLaVA-OneVision, where both hold. InternVL3-1B could not be a
+# third point because its full pass costs exactly what its cheap pass costs, so
+# its hull is degenerate. Running LLaVA-OneVision on a second corpus gives a
+# third point whose hull should be usable, and it is also the only cell that
+# varies model and corpus together: every other workload-model pair in the
+# paper shares either the corpus or the model with another.
+#
+# ChartQA charts have a median longest edge of 800 px, so step 3 of Algorithm 3
+# discarded two of SmolVLM's four rungs there. Whether it discards this model's
+# is a measurement, not an assumption, and the run reports the token counts
+# before anything is priced.
+
+model:
+  model_id: llava-hf/llava-onevision-qwen2-0.5b-ov-hf
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/chartqa500
+  pilot_manifest: data/processed/chartqa500/manifest.jsonl
+  records: results/runs/chartqa500_llavaov_records.jsonl
+  labels: results/runs/chartqa500_llavaov_labels.jsonl
+  router_dir: results/router-chartqa500-llavaov
+
+runner:
+  # Measured to land in four distinct visual-token buckets: 64, 320, 640, 1088.
+  # The 2048 px pass costs this model roughly 70 s per query at 7300 visual
+  # tokens, which is 10 to 16 hours for the pilot and buys one rung. The ladder
+  # is capped at 1152 px instead: 384 px is the cheap pass, 768 and 1152 px are
+  # the rungs, and they are already distinct at 1323, 3051 and 5913 tokens.
+  # This measures the two-regime inversion and the ladder, not the saturation
+  # ceiling, which the SmolVLM family already carries on this corpus.
+  lowres_sizes: [384, 768]
+  full_longest_side: 1152
+  # This study reads the resolution ladder only. Computing crops and OCR would
+  # triple the run for records it never opens.
+  include_crop: false
+  include_ocr: false
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: false
+    region_longest_side: 768
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  # One timing repeat: the affine token-cost model predicts pass latency to
+  # within 1.7 ms, so repeated timing buys nothing this study reads.
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005
+  lambda_energy_per_mj: 0.000002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 120
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 5000
+  image_dir: data/processed/chartqa500/images
+  per_dataset:
+    chartqa: 500

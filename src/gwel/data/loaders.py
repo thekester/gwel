@@ -27,6 +27,9 @@ DATASET_SOURCES: dict[str, dict[str, str]] = {
         "name": "InfographicVQA",
         "split": "validation",
     },
+    # A third workload, and the one where the serving model is strongest:
+    # the positive half of the two-regime claim needs more than one.
+    "chartqa": {"path": "lmms-lab/ChartQA", "split": "test"},
     "vstar": {"path": "craigwu/vstar_bench", "split": "test"},
 }
 
