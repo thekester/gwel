@@ -155,7 +155,7 @@ If you use Gwel in your research, please cite:
 ```bibtex
 @software{avenel2026gwel,
   author = {Avenel, Theophile},
-  title = {Gwel: Budget-Aware Active Perception for Sub-Billion-Parameter Vision-Language Models},
+  title = {A No-Signal Baseline for Visual Escalation: Which Signal Pays Depends on the Traffic},
   year = {2026},
   url = {https://github.com/thekester/gwel}
 }
