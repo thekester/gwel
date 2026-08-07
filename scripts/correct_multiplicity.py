@@ -302,6 +302,16 @@ def review_tests() -> list[tuple[str, list[float]]]:
     # The comparator's own slack. These enter the family because the paper
     # leans on two of them as retractions and on the rest as the bar its
     # surviving gaps clear, which is evidentiary use either way.
+    # The equivalence comparison. Its per-example paired differences are
+    # observations, not bootstrap replicates, so the family's bootstrap applies
+    # to them directly.
+    equivalence = Path("results/equivalence.json")
+    if equivalence.exists():
+        row = json.loads(equivalence.read_text())
+        vector = row.get("difference_vector")
+        if vector:
+            add("D2 accuracy: gain rule under the error-probability rule", vector)
+
     for tag, slack_path in (
         ("binary", Path("results/cost_only.json")),
         ("graded", Path("results/cost_only_graded.json")),
@@ -310,6 +320,17 @@ def review_tests() -> list[tuple[str, list[float]]]:
             for label, row in json.loads(slack_path.read_text()).items():
                 add(f"CV12 cost-only slack, {tag}, {label}", row.get("gap_vector"))
 
+
+    # The four refuted accounts of the descriptor's residual (CV14) are
+    # deliberately NOT in this family. Two reasons. Their artefact stores
+    # bootstrap replicates of an AUROC, and `bootstrap_p_value` expects paired
+    # differences over observations: resampling replicates would shrink the
+    # standard error by the square root of their count and declare every one of
+    # them significant. And the text leans on them to say that nothing
+    # separates, which is a claim about intervals covering 0.5 rather than a
+    # comparison; entering thirty-two non-claims here would also inflate the
+    # correction against the results we do assert. They are reported with
+    # confidence intervals in the paper instead.
     return tests
 
 

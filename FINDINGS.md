@@ -523,3 +523,111 @@ monotonically with spread, rho=0.914, p=0.0015. Guarded by CV10.
 Cost allocation explains 46% and 54% of the descriptor's gap on the two steep
 DocVQA pairs and 9% on the crossed cell. The remainder is unexplained; the
 descriptor's AUROC on the escalation target is 0.508 to 0.586 over all eight.
+
+## What carries the descriptor's residual: bounded search, no answer (2026-08-07)
+
+Cost allocation explains about half the free descriptor's gap on the steeply
+priced pairs. We tested four accounts of the rest with
+`scripts/descriptor_mechanism.py`, all on existing records.
+
+| pair | whether | how far | spread | length |
+|---|---|---|---|---|
+| DocVQA, SmolVLM-500M | 0.508 | 0.509 | 0.521 | 0.507 |
+| DocVQA, SmolVLM-256M | 0.509 | 0.508 | 0.519 | 0.512 |
+| DocVQA, SmolVLM2-2.2B | 0.516 | 0.491 | 0.508 | 0.513 |
+| InfoVQA, SmolVLM-500M | 0.508 | **0.692** [0.610, 0.777] | 0.504 | 0.516 |
+| InfoVQA, Qwen2-VL-2B | 0.568 | **0.640** [0.582, 0.711] | 0.568 | 0.540 |
+| DocVQA, Qwen2-VL-2B | 0.520 | 0.478 [0.390, 0.546] | 0.513 | 0.510 |
+| ChartQA, LLaVA-OV-0.5B | 0.586 | 0.472 [0.351, 0.608] | 0.545 | 0.600 |
+| DocVQA, LLaVA-OV-0.5B | 0.518 | 0.465 [0.407, 0.530] | 0.513 | 0.531 |
+
+**Rung selection was the good idea and we cannot decide it.** The clue: the
+descriptor's *binary* policies sit at +0.000 everywhere while its graded
+ladders clear, so what it supplies is not a whether-signal. But the how-far
+target separates only on the two InfoVQA pairs, where its policy clears least,
+and on the three pairs where its policy clears the intervals span 0.5 on 59 to
+161 repaired queries. Undetected, not refuted. Needs a corpus giving several
+hundred repaired queries on a steeply priced model.
+
+**Dispersion** never exceeds 0.568. **Answer length** hits 0.600 on the crossed
+cell only, which is also where cost allocation explains least: one cell, so a
+coincidence worth one experiment.
+
+**Two statistical traps caught here, both mine.** (1) Feeding bootstrap
+replicates to `bootstrap_p_value` treats replicates as observations and shrinks
+the SE by sqrt(200): every AUROC came out significant. (2) The same mistake via
+`bootstrap_interval` reported an AUROC at n=59 as [0.463, 0.482]. Fixed by
+percentile intervals over the replicates. CV14 is deliberately kept OUT of the
+Holm family: its null is 0.5, not 0, and 32 non-claims would inflate the
+correction against the results we do assert.
+
+## Equivalence tested rather than asserted, and a corruption that compiled (2026-08-07)
+
+**The UCCI accuracy comparison was an equivalence claimed from a null.** The
+caption said "the same answers" from a difference of 0.000 with a 95% interval
+of +/-0.025. A two one-sided test (`scripts/equivalence_test.py`) gives the
+honest version:
+
+| quantity | value |
+|---|---|
+| paired accuracy difference, n=200 | +0.0000 |
+| 95% interval | [-0.0250, +0.0250] |
+| 90% interval | [-0.0200, +0.0200] |
+| smallest supported margin | **0.020** |
+| equivalent at 0.010 | no |
+| equivalent at 0.020 | no |
+| equivalent at 0.050 | yes |
+| the two rules disagree on | **20% of queries** |
+
+So the paper may claim equivalence only against a margin of two accuracy
+points, and the answers were never the same: the rules escalate 34% and 54% and
+differ on one query in five. The bound is loose because the held-out fold is
+200 examples; tightening it needs a larger pilot, not a better test. Guarded by
+CV15, and the paired vector joined the Holm family (227 tests).
+
+**"The standard cascade recipe" is now attributed rather than universal.** It
+rested on one single-author unrefereed preprint, and our own related work
+presents that preprint as one of three approaches to threshold setting. Renamed
+in the abstract, the contributions and the conclusion. The measurement (59%
+more compute) is untouched.
+
+**A backslash eaten by a shell heredoc reached the compiled PDF.** `\rho`
+became CR + "ho" in the abstract, which LaTeX typeset as an italic "ho" without
+raising anything: the build stayed green, no reference was undefined, and the
+abstract announced a Spearman coefficient named "ho". Every control the project
+had passed. Now guarded by `tests/test_latex_integrity.py`, which fails on
+stray control characters and on orphaned command tails (`$ho`, `ef{tab:`,
+`imes`, `rac{`). The standing rule stands and I broke it twice: all LaTeX
+editing goes through script files, never a heredoc.
+
+## Load-bearing citations, verified against their sources (2026-08-07)
+
+**UCCI (arXiv:2605.18796), Kotte.** Theorem 1 exists and its condition (ii) is
+verbatim what we describe: "f_l achieves a fixed accuracy alpha_l on the test
+distribution that is invariant to which queries are escalated". The threshold is
+applied to the calibrated error probability, "among policies that depend only on
+u(x)", which matches Proposition 1's restriction to s-measurable policies.
+
+*New and useful:* the paper itself calls this "the most restrictive" of its
+three assumptions and validates it, reporting micro-F1 0.928 on escalated
+queries against 0.932 on the full test set, a difference of 0.004. That turns
+our contribution from "we correct an assumption" into "we show a condition its
+author singled out and verified for text fails for visual escalation, where the
+second pass repairs 21% and damages 4%". Rewritten in the abstract, the
+contributions, related work and the rule section.
+
+**AwaRes (arXiv:2603.16932), Shabtay et al.** The system is named AwaRes;
+"cold-start SFT followed by multi-turn GRPO" is verbatim; the judge is
+"an LaaJ (LLaMA-3.3-70B)"; the base model is Qwen2.5-VL-7B-Instruct, which
+confirms our "all three evaluate at 7B scale". Our earlier flag on this citation
+was unfounded and is withdrawn.
+
+**VisionThink (arXiv:2507.13348), Yang et al.** All three claims verified word
+for word: the ChartQA sentence we quote, "more than twice as fast" on DocVQA,
+and Qwen2.5-VL-7B-Instruct as the GRPO base. One correction applied: they
+compare against "the baseline QwenRL", not against a generic full-resolution
+baseline as we paraphrased, and their ChartQA token share is 101.4%. Both now in
+the text.
+
+The bibliography is otherwise clean: 23 entries, all cited, none missing, no
+padding.

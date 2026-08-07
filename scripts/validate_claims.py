@@ -2612,19 +2612,18 @@ def _():
     )
 
 
-@check("CV13: a cost-aware policy scored on single-shot timings harvests its own noise")
+@check("CV13: measured escalation price is information a server cannot have")
 def _():
-    """Why the cost-only measurement must order by predicted, not measured, cost.
+    """Why the cost-only comparator orders by predicted rather than measured cost.
 
-    Each pass in the single-domain pilots is timed once. Ordering examples by
-    measured escalation latency therefore selects the ones whose timing noise
-    ran favourably: the accuracy is banked and the noise absorbs the cost. On
-    the SmolVLM ladder a large minority of first-step latencies come out
-    non-positive, which is noise rather than a free upgrade. Ordering by
-    visual-token count, a deterministic function of the image and the
-    processor, removes the channel. This check reproduces both orderings and
-    asserts the measured one is inflated, which is the claim the paper makes
-    about its own retracted first attempt.
+    Ordering the cheapest tenth of DocVQA by measured escalation latency
+    reports about half the spend of ordering the same queries by predicted
+    visual tokens. We first reported that as noise harvesting on single-shot
+    timings. CV16 refutes the cause: the step's variation across examples is
+    five times its measurement spread and its non-positive cases reproduce
+    under averaging. What the latency ordering has is the realised price of a
+    pass before that pass has run, which no server can obtain. This check
+    asserts the fact and no longer asserts the cause.
     """
     config_path = "configs/docvqa1200.yaml"
     if not Path(config_path).exists():
@@ -2653,11 +2652,6 @@ def _():
     tokens = np.array([[grouped[e][c].visual_tokens for c in ladder] for e in ids], float)
     correct = np.array([[grouped[e][c].correct for c in ladder] for e in ids], float)
 
-    noisy_share = float((np.diff(latency, axis=1)[:, 0] <= 0).mean())
-    token_share = float((np.diff(tokens, axis=1)[:, 0] <= 0).mean())
-
-    # Escalate the cheapest tenth to the top rung under each ordering and
-    # compare the accuracy obtained per millisecond actually spent.
     def cheapest_tenth(order_by):
         picked = np.argsort(order_by)[: len(ids) // 10]
         gained = float(correct[picked, -1].mean() - correct[picked, 0].mean())
@@ -2666,14 +2660,188 @@ def _():
 
     by_latency = cheapest_tenth(latency[:, -1] - latency[:, 0])
     by_tokens = cheapest_tenth(tokens[:, -1] - tokens[:, 0])
-    inflated = by_latency[1] < by_tokens[1]
+    # Token steps must be strictly positive, or "predicted cost" would itself
+    # contain the free-upgrade information and the two orderings would agree.
+    token_steps_positive = float((np.diff(tokens, axis=1)[:, 0] > 0).mean())
+    separated = by_latency[1] < by_tokens[1]
 
-    return ("PASS" if inflated and noisy_share > 0.05 else "FAIL"), (
-        f"{noisy_share:.1%} of first-step latencies are non-positive against "
-        f"{token_share:.1%} of token steps; selecting the cheapest tenth by measured "
-        f"latency reports {by_latency[1]:.0f} ms spent for {by_latency[0]:+.3f} accuracy "
-        f"against {by_tokens[1]:.0f} ms for {by_tokens[0]:+.3f} by predicted tokens, so "
-        f"the measured ordering understates its own cost={inflated}"
+    return ("PASS" if separated and token_steps_positive > 0.95 else "FAIL"), (
+        f"escalating the cheapest tenth, selection by measured latency reports "
+        f"{by_latency[1]:.0f} ms for {by_latency[0]:+.3f} accuracy against {by_tokens[1]:.0f} ms "
+        f"for {by_tokens[0]:+.3f} by predicted tokens, so the two orderings differ "
+        f"materially={separated}; {token_steps_positive:.1%} of first-step token deltas are "
+        "positive, so the predicted ordering carries none of the realised price"
+    )
+
+
+@check("CV14: four accounts of the descriptor's residual, one undecided and three set aside")
+def _():
+    """The negative result behind the paper's open question.
+
+    Cost allocation explains about half the descriptor's gap on steeply priced
+    pairs. Rung selection was the natural candidate for the rest, since the
+    descriptor's binary policies sit at zero while its graded ladders clear, so
+    whatever it supplies cannot be a whether-signal. It fails exactly where it
+    would have to hold. This check pins that, and pins which cells do separate,
+    so a future run that moves one of them fails rather than passing under a
+    text that says none does.
+    """
+    path = Path("results/descriptor_mechanism.json")
+    if not path.exists():
+        return "SKIP", "results/descriptor_mechanism.json not built"
+    rows = json.loads(path.read_text())
+
+    # The pairs whose serving model prices resolution steeply, which are the
+    # ones where the descriptor's policy clears the hull.
+    steep = ["DocVQA, Qwen2-VL-2B", "ChartQA, LLaVA-OV-0.5B", "DocVQA, LLaVA-OV-0.5B"]
+    missing = [k for k in steep if k not in rows]
+    if missing:
+        return "SKIP", f"missing pairs {missing}"
+
+    how_far = {k: rows[k]["how_far"]["auroc"] for k in steep if rows[k].get("how_far")}
+    if len(how_far) != len(steep):
+        return "SKIP", "how-far target undefined on a steep pair"
+    # On the steep pairs the intervals must span chance, which is what makes
+    # the account undetected rather than refuted. An interval that moved off
+    # 0.5 either way would be a finding and must fail this check.
+    undecided = all(
+        rows[k]["how_far"]["ci"][0] <= 0.5 <= rows[k]["how_far"]["ci"][1] for k in steep
+    )
+
+    # Only the two InfographicVQA cells may exceed 0.60 on how far, and no cell
+    # at all on spread; a new separation elsewhere is a finding, not a pass.
+    separating = sorted(
+        k
+        for k, row in rows.items()
+        if row.get("how_far") and row["how_far"]["ci"][0] > 0.5
+    )
+    expected = ["InfoVQA, Qwen2-VL-2B", "InfoVQA, SmolVLM-500M"]
+    spread_flat = all(
+        not row.get("spread") or row["spread"]["auroc"] <= 0.60 for row in rows.values()
+    )
+
+    if not undecided:
+        return "FAIL", (
+            "a steep pair's how-far interval no longer spans chance, so the account is "
+            f"decided and the text is stale: "
+            + ", ".join(f"{k} {rows[k]['how_far']['ci']}" for k in steep)
+        )
+    if separating != expected:
+        return "FAIL", f"how-far separates on {separating}, the text names {expected}"
+    if not spread_flat:
+        return "FAIL", "gain dispersion now separates somewhere; the text says it never does"
+
+    # Underpowered rather than absent: record the sample the how-far test has.
+    repaired = {
+        k: int(round(rows[k]["repaired"] * rows[k]["n"])) for k in steep
+    }
+    return "PASS", (
+        "on the pairs where the descriptor's policy clears, its AUROC for how far to "
+        + "escalate is "
+        + ", ".join(
+            f"{k.split(',')[0]} {v:.3f} [{rows[k]['how_far']['ci'][0]:.3f}, {rows[k]['how_far']['ci'][1]:.3f}]"
+            for k, v in how_far.items()
+        )
+        + f", every interval spanning chance; how far separates only on {expected}, where the policy "
+        f"clears least; dispersion never exceeds 0.60. Repaired queries available to the "
+        f"how-far test: {repaired}, so this bounds the search rather than proving absence"
+    )
+
+
+
+@check("CV15: the two calibration targets are equivalent only against a stated margin")
+def _():
+    """Equivalence tested, not inferred from a non-significant difference.
+
+    The paired accuracy difference between the gain rule and the
+    error-probability rule is zero to three decimals, which says nothing on its
+    own: the interval spans two and a half accuracy points. A two one-sided
+    test turns that into a bound, and the bound is what the paper is allowed to
+    claim. This check also asserts the two rules still disagree per query, since
+    the aggregate equivalence is not an equivalence of answers.
+    """
+    path = Path("results/equivalence.json")
+    if not path.exists():
+        return "SKIP", "results/equivalence.json not built"
+    row = json.loads(path.read_text())
+
+    margin = row["smallest_margin"]
+    # The caption states 0.020. Anything tighter than that would make the text
+    # an overstatement; anything much looser means the artefact moved.
+    if not 0.015 <= margin <= 0.025:
+        return "FAIL", (
+            f"the smallest supported margin is {margin:.4f}, and the paper states 0.020"
+        )
+    # Equivalence must not hold at one accuracy point, or the paper is being
+    # more cautious than the data require and should say so.
+    if row["verdicts"].get("0.010"):
+        return "FAIL", "equivalence now holds at 0.010; the text understates the result"
+    # And the rules must still differ per query.
+    if row["disagreement_rate"] < 0.05:
+        return "FAIL", (
+            f"the rules now agree on {1 - row['disagreement_rate']:.0%} of queries; "
+            "the claim that this is not an equivalence of answers is stale"
+        )
+
+    return "PASS", (
+        f"paired accuracy difference {row['estimate']:+.4f} "
+        f"[{row['ci95'][0]:+.3f}, {row['ci95'][1]:+.3f}] on n={row['n']}; equivalence "
+        f"established only above a margin of {margin:.3f}, not at 0.010; the rules "
+        f"escalate {row['escalation_rate_gain']:.0%} against "
+        f"{row['escalation_rate_ucci']:.0%} and disagree on "
+        f"{row['disagreement_rate']:.0%} of queries, so aggregate accuracy is what is "
+        "equivalent and not the answers"
+    )
+
+
+
+@check("CV16: per-example escalation price is mostly real, and its free steps reproduce")
+def _():
+    """The re-timing that refuted our own noise explanation.
+
+    Every comparison in this paper is a cost comparison and the single-domain
+    pilots time each pass once, so the per-example price carries measurement
+    error. This bounds it on a subsample re-run with three repeats after a
+    discarded warmup, and asserts the two things the text now claims: that the
+    escalation step varies across examples far more than it varies across
+    repeats, and that its non-positive cases survive averaging, which is what
+    makes them a property of the serving stack rather than of the timer.
+    """
+    path = Path("results/timing_variance.json")
+    if not path.exists():
+        return "SKIP", "results/timing_variance.json not built"
+    row = json.loads(path.read_text())
+    step = row["first_step"]
+
+    ratio = step["step_signal_to_noise"]
+    single = step["non_positive_share_single_shot"]
+    averaged = step["non_positive_share_averaged"]
+    free_by_tokens = step["free_by_token_count_share"]
+
+    if ratio < 3.0:
+        return "FAIL", (
+            f"the escalation step's signal-to-noise is {ratio:.2f}; below three the paper "
+            "cannot claim per-example price is mostly real"
+        )
+    # Noise would not reproduce. If the averaged share collapses, the original
+    # explanation was right after all and the text is stale.
+    if abs(averaged - single) > 0.05:
+        return "FAIL", (
+            f"non-positive first steps move from {single:.1%} to {averaged:.1%} under "
+            "averaging, so they are timing noise and the retraction was wrong"
+        )
+    if free_by_tokens > 0.01:
+        return "FAIL", (
+            f"{free_by_tokens:.1%} of first steps cost no extra visual tokens, so patch-grid "
+            "quantisation explains them and the text's account is stale"
+        )
+
+    return "PASS", (
+        f"on {row['n']} re-timed pages the escalation step's spread across examples is "
+        f"{ratio:.2f} times its measurement spread ({step['step_between_sd_ms']:.1f} against "
+        f"{step['step_noise_sd_ms']:.1f} ms); its non-positive cases hold at {single:.1%} from "
+        f"one timing and {averaged:.1%} from three, and {free_by_tokens:.1%} of them are "
+        "explained by token count, so the stack is not monotone in visual tokens"
     )
 
 

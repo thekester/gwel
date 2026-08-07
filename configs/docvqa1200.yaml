@@ -61,8 +61,12 @@ runner:
   include_full: true
 
 profiling:
-  # One timing repeat: the affine token-cost model predicts pass latency to
-  # within 1.7 ms, so repeated timing buys nothing this study reads.
+  # One timing repeat. The original justification, that the affine token-cost
+  # model predicts pass latency to within 1.7 ms, was about bucket medians and
+  # does not carry to per-example dispersion, which is what a cost-aware policy
+  # ranks on. Check CV13 measures the consequence and configs/docvqa_timing.yaml
+  # re-times a subsample with three repeats to bound it. The accuracies and
+  # token counts here are unaffected: decoding is greedy and deterministic.
   energy_backends: auto
   sample_interval_ms: 20
   nvml_device_index: 0

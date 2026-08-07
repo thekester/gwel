@@ -1,0 +1,92 @@
+# A re-timing pass, because every comparison in this paper is a cost comparison.
+#
+# The single-domain pilots time each pass once. We justified that in
+# configs/docvqa1200.yaml on the grounds that the affine token-cost model
+# predicts pass latency to within 1.7 ms, "so repeated timing buys nothing this
+# study reads". That justification is now falsified by our own measurement: a
+# cost-only policy ordering queries by *measured* escalation latency reports 93
+# ms spent for +0.517 accuracy where the same policy ordering by predicted
+# tokens reports 188 ms for +0.400. Single-shot timings can be harvested, and
+# the token-cost model's accuracy on bucket medians says nothing about the
+# per-example dispersion a policy selects on.
+#
+# This run re-times a subsample of the DocVQA ladder with three repeats and one
+# warmup, which is enough to put an interval on the per-example latency of each
+# rung and so on the escalation price the hull is built from. It answers the
+# reviewer question we could not answer: how much of the per-example cost
+# variation our policies read is real, and how much is measurement.
+#
+# Everything else matches configs/docvqa1200.yaml, so the two are comparable
+# example by example: same model, same rungs, same prompt, same decoding.
+
+model:
+  model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/docvqa1200
+  pilot_manifest: data/processed/docvqa1200/manifest.jsonl
+  records: results/runs/docvqa_timing_records.jsonl
+  labels: results/runs/docvqa_timing_labels.jsonl
+  router_dir: results/router-docvqa-timing
+
+runner:
+  lowres_sizes: [384, 768, 1152]
+  full_longest_side: 2048
+  include_crop: false
+  include_ocr: false
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: false
+    region_longest_side: 768
+    preview_size: 256
+  # Three timings per pass after one discarded warmup. The warmup matters more
+  # than the count here: the first call on a new image size pays allocator and
+  # kernel-selection costs that no served query would pay twice.
+  repeats: 3
+  warmup: 1
+  include_no_image: false
+  include_full: true
+
+profiling:
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005
+  lambda_energy_per_mj: 0.000002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 120
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 5000
+  image_dir: data/processed/docvqa1200/images
+  per_dataset:
+    docvqa: 1200
