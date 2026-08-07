@@ -1,0 +1,98 @@
+# A fourth workload, and the first that is not a document.
+#
+# The two-regime claim rests on three single-domain corpora, and all three are
+# document-like: scanned pages, infographics, charts. A reviewer is entitled to
+# read the result as a documents-versus-mixture finding rather than a claim
+# about traffic homogeneity, and eight of our corpus-model pairs sit on DocVQA
+# alone. That is the largest open objection to the paper.
+#
+# TextVQA answers it because it is categorically different on the axis that
+# matters. Its images are natural photographs whose text is incidental to the
+# scene rather than the whole of it, so resolution buys legibility of a small
+# region rather than of the page. On the four-dataset mixture escalation is
+# worth +0.088 there, well above VQAv2's +0.016 and well below DocVQA's +0.407,
+# which is the intermediate regime we have never sampled: enough escalation
+# value for a policy to have something to allocate, without the near-total
+# dependence on resolution that makes documents easy.
+#
+# Two predictions this corpus can falsify. If the free descriptor falls to
+# chance here as it does on the three document corpora, the collapse is a
+# property of removing the between-domain axis rather than of documents. If it
+# does not, our central claim is narrower than we state it.
+#
+# Scored with VQA accuracy, the metric the benchmark defines: ten human answers
+# per question, credit proportional to agreement. ANLS would be wrong here for
+# the same reason it is wrong on ChartQA, and exact match would discard the
+# annotator disagreement the benchmark is built around.
+
+model:
+  model_id: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: auto
+  dtype: bfloat16
+  max_new_tokens: 16
+  answer_prompt: "Answer with a single word or short phrase."
+
+paths:
+  data_dir: data
+  pilot_dir: data/processed/textvqa500
+  pilot_manifest: data/processed/textvqa500/manifest.jsonl
+  records: results/runs/textvqa500_records.jsonl
+  labels: results/runs/textvqa500_labels.jsonl
+  router_dir: results/router-textvqa500
+
+runner:
+  # The same ladder as the document corpora, so the two are comparable rung by
+  # rung. Step 3 of Algorithm 3 will reject any rung that turns out not to be
+  # distinct on these images, which is the guard that fired on ChartQA.
+  lowres_sizes: [384, 768, 1152]
+  full_longest_side: 2048
+  include_crop: false
+  include_ocr: false
+  crop:
+    rows: 2
+    cols: 2
+    overlap: 0.2
+    longest_side: 512
+    preview_size: 256
+  ocr:
+    backend: pytesseract
+    source: full
+    source_longest_side: 768
+    regions: false
+    region_longest_side: 768
+    preview_size: 256
+  repeats: 1
+  warmup: 0
+  include_no_image: true
+  include_full: true
+
+profiling:
+  energy_backends: auto
+  sample_interval_ms: 20
+  nvml_device_index: 0
+  hardware_repeats: 1
+  hardware_warmup: 0
+
+cost:
+  error_weight: 1.0
+  lambda_latency_per_ms: 0.00005
+  lambda_energy_per_mj: 0.000002
+  lambda_memory_per_mb: 0.0
+  lambda_visual_tokens: 0.0001
+
+router:
+  feature_config_id: lowres_384
+  hidden_dims: [128, 64]
+  dropout: 0.1
+  lr: 0.001
+  epochs: 120
+  batch_size: 32
+  val_fraction: 0.2
+  seed: 1234
+
+datasets:
+  seed: 1234
+  shuffle_buffer_size: 5000
+  image_dir: data/processed/textvqa500/images
+  per_dataset:
+    textvqa: 500

@@ -2,31 +2,61 @@
 
 ## Status
 
-The end-to-end pipeline runs on real hardware: pilot construction, the
-multi-configuration oracle runner, cost-based labeling, and router
-distillation. A 20-example balanced pilot (5 each of VQAv2, TextVQA, DocVQA,
-V*Bench) has been measured on an RTX 4060.
+The measurement and audit pipeline is operational on real hardware. The
+repository now contains multi-corpus and multi-model evidence, not only the
+original 20-example smoke pilot: VQAv2, TextVQA, DocVQA, V*Bench, ChartQA,
+and InfographicVQA are covered by replayable configs and offline analyses.
 
-## Current focus
+The main scientific conclusion is deliberately conditional. A pooled free
+descriptor can clear a routing frontier, but it is partly a provenance or
+dataset signal. Within a workload, the useful ordering can instead come from
+the model-read signal, a graded action ladder, or the measured price of the
+next rung. The paper records these inversions and the statistical corrections
+rather than presenting the pooled result as universal.
 
-- Scale the pilot to 100-200 balanced examples, the smallest size where the
-  router's accuracy/cost trade-off can be read with any confidence.
-- Decide whether OCR stays a routable action: on the 20-example pilot it was
-  never the minimal correct action, because a crop reached the same
-  correctness at roughly a third of the latency.
-- Report the accuracy/cost Pareto front against the fixed policies
-  (always-lowres, always-full, always-OCR) and the oracle.
+## Completed
 
-## Near-term milestones
+- End-to-end oracle, labels, router evaluation, profiling, and cold-start
+  measurement.
+- Risk-coverage, Pareto, ablation, multiplicity, equivalence, and timing
+  variance checks with executable claim thresholds.
+- Replications across model lineages and scales, including a token-controlled
+  resolution test and a second corpus where the original ceiling does not
+  transfer unchanged.
+- Cost-only and free-signal baselines, provenance/confound tests, and
+  per-example timing audits.
+- Paper source, compiled PDF, figures, configs, and analysis scripts published
+  in the repository.
 
-1. Balanced 100-200 example pilot with a fixed seed.
-2. Router trained on that pilot, evaluated with risk-coverage and Pareto.
-3. Ablations: crop grid density, low-res ladder, OCR source resolution.
-4. Cross-device measurement to check whether the cost weights transfer.
+## Current Focus
 
-## Out of scope for now
+1. Finish the remaining corpus/model timing runs and keep their raw records
+   out of Git while committing only configs and reproducible analyses.
+2. Resolve the descriptor's residual: cost allocation explains much, but not
+   all, of its frontier clearance. The next useful test needs several hundred
+   repaired queries on a steeply priced workload and should target graded
+   rung selection rather than another binary router.
+3. Rebuild the energy measurement path before making token-to-joule claims.
+   The current NVML measurements fail the equal-token validity check; locked
+   clocks, repeated runs, and a constant-power/time model are the defensible
+   next options.
+4. Decide which claims belong in the main paper versus the artifact appendix.
+   In particular, keep workload-specific wins separate from general routing
+   claims and preserve the Holm/equivalence qualifications.
 
-- Training a custom model from scratch.
-- Learning where to crop: the runner measures every grid cell, and the
-  router only chooses the action class.
-- Large-scale infrastructure work before the pilot is validated.
+## Engineering Gaps
+
+- The current runner measures every crop cell; a learned localizer is not yet
+  a deployed policy.
+- Question embeddings are not part of the router feature set; current free
+  features are image, dataset, lexical, and hardware signals.
+- Cross-device transfer of the cost model remains incomplete.
+- Raw datasets, model weights, and large JSONL records are intentionally not
+  versioned in Git.
+
+## Out Of Scope
+
+- Training a custom vision-language model from scratch.
+- Claiming a universal winner from pooled mixtures.
+- Large serving infrastructure before the measurement and cost model are
+  stable.

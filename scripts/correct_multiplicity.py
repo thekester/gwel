@@ -271,6 +271,7 @@ def review_tests() -> list[tuple[str, list[float]]]:
         ("DocVQA LLaVA-OV", "results/free_signal_llavaov.json"),
         ("DocVQA Qwen2-VL-2B", "results/free_signal_qwen2b.json"),
         ("ChartQA LLaVA-OV", "results/free_signal_chartqa_llavaov.json"),
+        ("TextVQA", "results/free_signal_textvqa.json"),
         ("DocVQA SmolVLM2-2.2B", "results/free_signal_docvqa_2b.json"),
         ("InfoVQA Qwen2-VL-2B", "results/free_signal_infovqa_qwen2b.json"),
     ):
@@ -311,6 +312,17 @@ def review_tests() -> list[tuple[str, list[float]]]:
         vector = row.get("difference_vector")
         if vector:
             add("D2 accuracy: gain rule under the error-probability rule", vector)
+
+    second = Path("results/second_mixture.json")
+    if second.exists():
+        for name, row in json.loads(second.read_text())["hull_gaps"].items():
+            add(f"CV20 second mixture, {name}", row.get("gap_vector"))
+
+    retimed = Path("results/oracle_slack_retimed.json")
+    if retimed.exists():
+        rows = json.loads(retimed.read_text())
+        for key in ("oracle_single_shot", "oracle_averaged", "deployable_tokens"):
+            add(f"CV17 re-timed slack, {key}", rows[key].get("gap_vector"))
 
     for tag, slack_path in (
         ("binary", Path("results/cost_only.json")),

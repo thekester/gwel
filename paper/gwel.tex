@@ -44,9 +44,8 @@
 \definecolor{gwelteal}{HTML}{00806A}
 \definecolor{gwelgrid}{HTML}{D8D8D6}
 
-\title{\vspace{-2em}\textbf{Which Escalation Signal Pays Depends on the
-Traffic:\\ Free Baselines, Corpus Ceilings and Graded Actions in Visual
-Cascades Without Training}\vspace{-0.5em}}
+\title{\vspace{-2em}\textbf{A No-Signal Baseline for Visual Escalation:\\
+Which Signal Pays Depends on the Traffic}\vspace{-0.5em}}
 \author{Theophile Avenel\\
 \small\href{https://github.com/thekester/gwel}{github.com/thekester/gwel}}
 \date{}
@@ -98,7 +97,7 @@ repaired below the top rung, and accuracy saturates at a resolution four models
 agree on, at $640$ to $1312$ visual tokens. A second corpus does not share that
 ceiling: there a weak model's null is its own capacity, which supplies the
 precondition our procedure lacked. All comparisons are corrected for
-family-wise error over the two hundred and twenty-seven paired tests reported
+family-wise error over the two hundred and fifty-four paired tests reported
 here, of which twenty-four do not survive.
 \end{abstract}
 
@@ -1324,6 +1323,141 @@ the floor at the two loosest preferences, which is the mixture result
 \S\ref{sec:regimes} reports and \S\ref{sec:singledomain} inverts.}
 \label{fig:ceiling}
 \end{figure}
+
+\paragraph{A fourth workload, and the first that is not a document.} The
+positive half of the two-regime claim, that a signal read from the model clears
+the hull inside a workload, rested on three document corpora. TextVQA is
+natural photographs whose text is incidental to the scene, and it separates
+that half from the kind of image involved. Output entropy scores $0.708$ on the
+escalation target there, against DocVQA's $0.731$, and \textbf{its policy
+clears the hull at all four preferences} ($+0.047$, $+0.044$, $+0.030$,
+$+0.025$ for the binary rule). The positive half is therefore not a property of
+documents.
+
+\textbf{We report no descriptor column on this corpus, deliberately.} As
+distributed, $98.8\%$ of its images are exactly $1024$\,px
+(Table~\ref{tab:sizes}), so a size descriptor is constant and would score
+chance whatever it knew. Reporting that as a confirmation of the collapse would
+be measuring the packaging.
+
+\textbf{It also fires our own rung guard, on a corpus written before it.} Those
+same $1024$\,px images cap the ladder: mean visual tokens run $64$, $317$,
+$318$, $318$ across the four rungs, against DocVQA's $64$, $316$, $627$,
+$1002$, so the top two rungs are duplicates of the second for $99.8\%$ of
+pages. With no intermediate rung to choose, the graded rule pays a calibration
+cost for a decision it cannot make, and \textbf{the binary rule beats it at
+every preference} ($+0.047$ against $+0.042$ at the tightest). This is the
+second corpus after ChartQA on which step~3 of Algorithm~\ref{alg:ceiling}
+rejects rungs we had assumed distinct, and it is the sharpest statement of when
+graded actions pay: not when a policy would like more choices, but when the
+processor actually delivers them.
+
+\paragraph{A second mixture, sharing nothing with the first.} Most of the
+evidence above sets one mixture against single workloads, and five of our eight
+corpus-model pairs sit on DocVQA, so the regime effect could be read as a
+property of pilot1000 against a property of DocVQA. The three single-domain
+corpora answer that without new inference: they were collected on the same
+serving model with the same ladder, so their union is a mixture that shares no
+dataset and no scale with pilot1000 (Table~\ref{tab:secondmix}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccc}
+\toprule
+ & $n$ & image size & output entropy \\
+\midrule
+DocVQA & $1200$ & $0.508$ & $0.667$ \\
+InfographicVQA & $500$ & $0.508$ & $0.514$ \\
+ChartQA & $500$ & $0.532$ & $0.658$ \\
+\midrule
+\textbf{their union} & $2200$ & $\mathbf{0.627}$ & $0.641$ \\
+\bottomrule
+\end{tabular}
+\caption{AUROC on the escalation target inside each corpus and over their
+union, SmolVLM-500M. The free descriptor gains $0.095$ over the best of the
+three parts by pooling alone; the model-read signal does not gain, because it
+was already reading something inside each part.}
+\label{tab:secondmix}
+\end{table}
+
+\textbf{The confound reappears, on a mixture built to make it harder.} Pooling
+lifts the free descriptor from $0.508$ to $0.627$ while leaving the model-read
+signal where it was. That is the same inflation \S\ref{sec:confound} measures on
+pilot1000, and it happens here despite the label being degraded on purpose: in
+pilot1000 the four benchmarks arrive at three distinct modal sizes, whereas two
+of these three corpora are modal at $2048$\,px (Table~\ref{tab:sizes}), so size
+discriminates them less well. Its \emph{policy} follows: over the union the
+descriptor's ladder clears at two preferences of four ($+0.020$ and $+0.007$)
+where it clears at none inside DocVQA or InfographicVQA.
+
+\textbf{Two things this does not show.} The costing follows the single-domain
+protocol, which prices each rung but does not charge a signal what it costs to
+read, so these entropy rows are not comparable with the mixture results of
+\S\ref{sec:regimes}, where charging the read is what sinks entropy. And all
+three corpora are document-like, so the union varies how much escalation is
+worth without varying what kind of image arrives; a mixture of documents and
+photographs would test both, and the corpus we prepared for it turned out to be
+pre-resized to a constant.
+
+\paragraph{Why size identifies a benchmark, and what that costs our own claim.}
+We report that image size predicts a query's source dataset and read its value
+on a mixture as dataset identification, without saying why the two should be
+related at all. The reason is mundane and worth stating, because it generalises
+past this paper: \textbf{benchmarks are distributed pre-resized, each to its own
+convention}. In our mixture $86.3\%$ of DocVQA images are exactly $2048$\,px on
+the longest edge, $97.6\%$ of TextVQA are $1024$, $84.7\%$ of VQAv2 are $640$
+and $85.3\%$ of V*Bench are $2048$ (Table~\ref{tab:sizes}). A free size
+descriptor pooled over such a mixture is close to reading a label stamped on
+every image by whoever packaged it, and any experiment that pools benchmarks
+and reads a size-correlated feature inherits that.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccc}
+\toprule
+corpus & median edge & modal share & distinct \\
+\midrule
+\multicolumn{4}{l}{\emph{inside the four-dataset mixture}} \\
+VQAv2 & $640$ & $84.7\%$ & $6$ \\
+TextVQA & $1024$ & $97.6\%$ & $2$ \\
+DocVQA & $2048$ & $86.3\%$ & $37$ \\
+V*Bench & $2048$ & $85.3\%$ & $15$ \\
+\midrule
+\multicolumn{4}{l}{\emph{the single-domain corpora}} \\
+DocVQA ($1200$) & $2048$ & $88.6\%$ & $92$ \\
+InfographicVQA & $2048$ & $57.4\%$ & $96$ \\
+ChartQA & $800$ & $69.6\%$ & $58$ \\
+\bottomrule
+\end{tabular}
+\caption{Longest-edge distribution of each corpus as distributed. Modal share
+is the fraction of images at the single most common size. Four distinct medians
+across a mixture make size a near-label; one modal value inside a corpus leaves
+little to rank.}
+\label{tab:sizes}
+\end{table}
+
+\textbf{This narrows our own statement and we narrow it.} We attribute the
+descriptor's collapse inside a workload to the removal of the between-domain
+axis. Part of it is plainer: within a single corpus between $57\%$ and $99\%$
+of images share one size, so the descriptor has little variance left whatever it
+might know. The two explanations are separable in principle and our data does
+not separate them: across our three single-domain corpora the descriptor's
+AUROC does not order with their size variance (DocVQA is the least varied at a
+$88.6\%$ modal share and scores lowest at $0.514$, but ChartQA is more varied
+than InfographicVQA and scores higher), so variance is not the whole account.
+On three corpora that ordering is not evidence either way
+[RESULT NEEDED: a workload with wide native size variance would separate them].
+
+\textbf{It also rules out a corpus we prepared.} TextVQA was to be a fourth
+single-domain workload and the first that is not a document, which is the
+scope objection this paper is most exposed to. As distributed, $98.8\%$ of its
+$500$ images are exactly $1024$\,px with an interquartile range of zero. A size
+descriptor is constant there, so ``the descriptor falls to chance on TextVQA''
+would have been true by construction rather than by measurement, and we do not
+report it as evidence. \textbf{Testing a free descriptor on a pre-resized
+corpus measures the packaging, not the signal}, and the check is one line.
 
 \paragraph{And an upper bound on what the confound can be worth.} If the
 signals above are reading dataset identity, the natural ceiling is a policy
@@ -2655,10 +2789,40 @@ reports. \textbf{Read as a bound on what a deployable signal-free policy
 achieves, the slack is at most $+0.008$ on seven pairs; read as a bound on what
 an oracle over cost achieves, it reaches $+0.053$, and two of our clearances
 would not survive that stronger floor.} We report the first because it is the
-comparator an operator faces, and the second here because a reader who prefers
-the stronger floor is entitled to the number [À VÉRIFIER: the oracle figures
-come from the ordering we retracted and were not recomputed on the re-timed
-subsample].
+comparator an operator faces, and the second because a reader who prefers the
+stronger floor is entitled to the number.
+
+\textbf{The oracle floor is not a timing artefact, and we checked.} Its figures
+originally came from single-shot timings, so we recomputed them on the re-timed
+subsample where the same policy can be scored twice, once ordering by one
+timing and once by the mean of three (Table~\ref{tab:oracle}). Ordering by one
+timing is worth $+0.008$ of gap, about a fifth of the effect; the rest survives
+averaging. Knowing a pass's realised price before deciding is therefore worth
+something real, and worth a great deal: on this pair the same policy moves from
+$-0.041$ when it must predict the price to $+0.028$ when it is told it, a
+distance of $0.070$ in accuracy at matched cost. \textbf{That distance is the
+price of not knowing what a pass will cost until it has run}, and it is larger
+than any signal advantage we report.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lcc}
+\toprule
+the policy orders queries by & rate & gap to hull \\
+\midrule
+measured latency, one timing & $10\%$ & $+0.036\ [+0.030, +0.043]$ \\
+measured latency, mean of three & $10\%$ & $+0.028\ [+0.022, +0.035]$ \\
+predicted visual tokens & $10\%$ & $-0.041\ [-0.050, -0.032]$ \\
+\bottomrule
+\end{tabular}
+\caption{What a signal-free policy reaches on DocVQA read by SmolVLM-500M when
+it is allowed to read different notions of cost, on the $150$ re-timed pages of
+Table~\ref{tab:timing}, $40$ resampled folds of $75$. All three are
+\emph{charged} the averaged cost; only what they may read differs. One
+corpus-model pair bounds this question rather than settling it.}
+\label{tab:oracle}
+\end{table}
 
 \textbf{Cost allocation is a partial mechanism, and this puts a share on it.}
 \S\ref{sec:policy} read the free descriptor's clearance on steeply priced
@@ -2778,6 +2942,35 @@ signal is credited \\
 \> with $\mathrm{gap}(\pi) - \mathrm{slack}$ and no more
 \end{tabbing}
 \end{algorithm}
+
+\paragraph{The comparator applied to a published system, on its own numbers.}
+A floor nobody has seen used outside the paper that proposes it is a floor
+nobody adopts, so we apply ours to the work closest to this one. On ChartQA,
+\cite{visionthink} report that retaining $100\%$ of visual tokens scores
+$79.8$, that retaining $25\%$ scores $62.9$, and that their trained policy
+scores $79.8$ while retaining $101.4\%$. Those three numbers place the policy
+on the plane their own two configurations span. \textbf{It costs more than the
+more expensive of the two and attains exactly its accuracy, so it is dominated
+by a fixed configuration}: not merely inside the randomisation hull, but below
+one of the vertices that trace it. No mixing is needed to match it, and paying
+$1.4\%$ more than always-escalating is the whole of what the trained decision
+buys on that benchmark.
+
+We report this as a demonstration of the comparator and not as a criticism of
+their system, for three reasons that a reader should weigh. Their paper states
+the same fact and explains it, that on ChartQA the model ``identifies that most
+questions cannot be answered correctly at low resolution and thus autonomously
+requests high-resolution images'', which is the correct decision on a corpus
+where the cheap pass mostly fails and is exactly the degeneracy
+\S\ref{sec:regimes} measures on our own $500$M model at $80\%$. ChartQA is also
+the only one of their nine benchmarks with a per-benchmark cost: their headline
+$51.3\%$ retention is an average across all nine and cannot be read onto one,
+so we do not attempt the other eight. And their cost is a visual-token share
+rather than the measured latency our own comparisons use, which the
+two quantities need not track (\S\ref{sec:cost}). \textbf{What the exercise
+shows is that the floor is computable from what such papers already publish},
+which is the property that would let this literature adopt it
+[À VÉRIFIER: numbers quoted from their Table 2, not reproduced by us].
 
 \textbf{The floor this comparator relaxes.}
 Algorithm~\ref{alg:hull} states the whole procedure, including the rejection
@@ -3635,7 +3828,7 @@ so part of what transfers may be encoder-side rather than genuinely
 cross-model; separating those requires a source model with a different encoder.
 
 We ask many questions of one dataset mixture, so the intervals above are
-corrected rather than nominal. Two hundred and twenty-seven paired
+corrected rather than nominal. Two hundred and fifty-four paired
 comparisons at the nominal $5\%$ level make at least one false positive close
 to certain, so we convert
 each bootstrap to a two-sided p-value and run Holm's step-down over the whole
@@ -3643,8 +3836,8 @@ family. Every comparison carries its own resample vector, so all of them are
 scored by the same bootstrap rather than by an approximation to a reported
 interval.
 
-One hundred and sixty-three of the two hundred and twenty-seven clear the
-nominal level and one hundred and thirty-nine survive the step-down. Twenty-four claims
+One hundred and eighty-eight of the two hundred and fifty-four clear the
+nominal level and one hundred and sixty survive the step-down. Twenty-four claims
 are lost, and they are worth naming individually because six of them are
 convenient for our thesis. Five of the twenty-four are loopholes we measured
 against ourselves: the graded cost-only slack adjusts out on four of the eight
@@ -3704,7 +3897,7 @@ uncertain.
 
 Every numeric claim in this paper is re-derived from the run records by a
 validation harness with an explicit threshold per claim, which exits non-zero if
-any stops holding; it currently checks eighty, including the negative
+any stops holding; it currently checks eighty-five, including the negative
 results on localization, on our own energy instrument, and on the universality
 of Pareto dominance, that last one asserts the claim is \emph{not} universal,
 so restating it too strongly fails the build. Claims stated in the text and

@@ -1,8 +1,30 @@
 # gwel
 
-Budget-aware active perception for sub-1B VLMs.
+Budget-aware active perception for small vision-language models.
 
-Gwel picks the cheapest visual action per query: answer from low-res, request a crop, or run OCR under real memory, latency, and energy constraints.
+Gwel measures whether a second visual pass is worth its cost before taking it.
+It compares low-resolution answers, graded resolution ladders, crops, OCR, and
+pre-generation signals under measured latency, memory, token, and energy
+budgets.
+
+This is a research artifact, not a claim that one router wins everywhere. The
+current evidence says that the useful signal depends on the workload: a free
+image descriptor can be competitive on a heterogeneous mixture, while
+model-read signals and graded ladders are more reliable inside a workload.
+The experiments explicitly test these failure modes instead of hiding them
+behind one pooled score.
+
+## Current Status
+
+- Reproducible oracle, labeling, routing, profiling, and claim-validation
+  pipeline on real hardware.
+- Evaluated across VQAv2, TextVQA, DocVQA, V*Bench, ChartQA, and
+  InfographicVQA, with several SmolVLM, Qwen2-VL, and LLaVA-OneVision models.
+- The paper and compiled PDF are in [`paper/`](paper/); the measured findings
+  and rejected hypotheses are in [`FINDINGS.md`](FINDINGS.md) and
+  [`ANGLES.md`](ANGLES.md).
+- `python scripts/validate_claims.py` currently checks every reported claim
+  against explicit numerical thresholds.
 
 ## Development
 
@@ -31,7 +53,8 @@ python scripts/measure_coldstart.py  # cold vs warm tool-loading costs
 ```
 
 `python scripts/status.py --watch` reports how far each stage has got and is
-safe to run while an oracle run is in progress.
+safe to run while an oracle run is in progress. Large model runs and raw
+records are intentionally not committed; configs and analysis scripts are.
 
 `python scripts/validate_claims.py` re-derives every claim written in
 `FINDINGS.md`, `ANGLES.md` and `PROPOSAL.md` from the data, with an explicit
@@ -81,17 +104,15 @@ python scripts/validate_energy.py         # is the energy instrument usable at a
 ```
 
 For a one-example end-to-end validation, replace the config argument with
-`--config configs/smoke.yaml` at each stage; `configs/pilot20.yaml` runs a
-balanced 20-example pilot across all four datasets.
+`--config configs/smoke.yaml` at each stage. `configs/pilot20.yaml` is the
+small smoke-scale mixture; the substantive analyses use the 500- to
+1200-example corpus/model runs listed in `configs/`.
 
-`configs/docvqa1200.yaml` is a single-domain pilot built to answer two questions
-the four-dataset mixture cannot: whether the probe's within-domain collapse is a
-real absence of signal or merely a starved fit, and whether the resolution
-ladder pays when every rung is verified to cost strictly more than the one below
-it. Its rungs were chosen by measuring SmolVLM's patch-grid buckets (64, 320,
-640 and 1088 visual tokens) rather than by picking round pixel sizes, which is
-how the mixture ended up with a "full resolution" pass that was not distinct
-from the rung below it on 56% of its examples.
+`configs/docvqa1200.yaml` is the main single-domain corpus. It separates two
+questions that the pooled mixture confounds: whether a probe transfers within
+one workload, and whether a resolution ladder pays when its rungs are actually
+distinct. The newer corpus/model configs extend the same checks to ChartQA,
+InfographicVQA, TextVQA, Qwen2-VL, and LLaVA-OneVision.
 
 Per example the oracle runner measures: blind baseline, low-res previews at
 several sizes (ANSWER_LOW), capped full resolution (diagnostic), preview + one
@@ -101,11 +122,23 @@ margin), visual-token counts, latency (median/IQR/p95 + time-to-first-token),
 peak RAM/VRAM, and energy (RAPL on Linux CPUs, NVML power integration on
 NVIDIA GPUs, minus a measured idle baseline).
 
-Correctness uses the metric each benchmark defines (VQA accuracy for VQAv2 and
-TextVQA, ANLS for DocVQA, exact match for V*Bench multiple choice) and is
-recomputed offline from the stored answers, so changing the metric never
-requires re-running the model (`--metric vqa` reverts to a single metric
-everywhere).
+Correctness uses the metric each benchmark defines and is recomputed offline
+from stored answers, so changing a scoring rule never requires re-running the
+model. Dataset-specific loaders and metrics are kept in `gwel/data/`; the
+manifest records the source and split used for every example.
+
+## Interpreting Results
+
+The central comparison is not probe versus entropy in isolation. Every result
+should be read against fixed configurations, a cost-only baseline, and the
+oracle frontier at the same preference. The current paper therefore reports
+both positive findings and corrections: pooled gains can be provenance or
+dataset effects, token count is not a universal cost proxy, and measured
+per-example timing can reorder the actions after the decision.
+
+For the current evidence and the remaining open experiment, start with
+[`ROADMAP.md`](ROADMAP.md), then read the dated entries at the end of
+[`FINDINGS.md`](FINDINGS.md).
 
 Package layout:
 

@@ -2845,6 +2845,291 @@ def _():
     )
 
 
+
+@check("CV17: the cost-oracle floor survives averaging, and the deployable one does not clear")
+def _():
+    """Whether knowing a pass's realised price is information or measurement error.
+
+    We first read the oracle comparator's advantage as noise harvested from
+    single-shot timings. Re-timing says otherwise: most of it survives
+    averaging. This check pins that split, and pins the sign of the deployable
+    policy, since the paper's claim that the two floors are far apart rests on
+    one being above the hull and the other below it.
+    """
+    path = Path("results/oracle_slack_retimed.json")
+    if not path.exists():
+        return "SKIP", "results/oracle_slack_retimed.json not built"
+    row = json.loads(path.read_text())
+
+    single = row["oracle_single_shot"]["gap"]
+    averaged = row["oracle_averaged"]["gap"]
+    tokens = row["deployable_tokens"]["gap"]
+
+    # The oracle must still clear after averaging, or the retracted noise
+    # explanation was right after all.
+    if averaged[1] <= 0.0:
+        return "FAIL", (
+            f"the averaged oracle gap is {averaged[0]:+.3f} {averaged[1:]}, which no longer "
+            "excludes zero; the text says it survives averaging"
+        )
+    # Noise must be a minority of the effect, which is the paper's "about a
+    # fifth". Allow a wide band; the claim is a proportion, not a constant.
+    share = (single[0] - averaged[0]) / single[0]
+    if not 0.05 <= share <= 0.45:
+        return "FAIL", (
+            f"single-shot ordering accounts for {share:.0%} of the oracle gap; the text "
+            "describes it as about a fifth"
+        )
+    # And the deployable policy must sit below the hull, or the two floors are
+    # not far apart and the paragraph overstates.
+    if tokens[2] >= 0.0:
+        return "FAIL", (
+            f"the token-ordered policy reaches {tokens[0]:+.3f} {tokens[1:]}, which is not "
+            "below the hull; the distance claim is stale"
+        )
+
+    return "PASS", (
+        f"on {row['n']} re-timed pages: ordering by one timing gives {single[0]:+.3f}, by "
+        f"three {averaged[0]:+.3f} (noise is {share:.0%} of it), and by predicted tokens "
+        f"{tokens[0]:+.3f}; the cost a server cannot know is worth "
+        f"{averaged[0] - tokens[0]:.3f} accuracy at matched spend"
+    )
+
+
+
+@check("CV18: a published policy is dominated by a fixed configuration on its own numbers")
+def _():
+    """The comparator applied outside this paper, on ChartQA.
+
+    VisionThink report three points on ChartQA: 100% of visual tokens scores
+    79.8, 25% scores 62.9, and their trained policy scores 79.8 at 101.4%. The
+    claim in the text is not that the policy sits inside the randomisation hull
+    but the stronger one that it is dominated by a vertex, which needs the cost
+    to exceed the dearest configuration and the accuracy to not exceed it.
+
+    These are quoted numbers, not measurements of ours, so the check restates
+    the arithmetic rather than reading an artefact.
+    """
+    cheap_share, cheap_score = 25.0, 62.9
+    full_share, full_score = 100.0, 79.8
+    policy_share, policy_score = 101.4, 79.8
+
+    dominated = policy_share > full_share and policy_score <= full_score
+    # The hull over the two fixed points, evaluated where the policy would sit
+    # if it were inside their range, is reported for context only.
+    if policy_share <= full_share:
+        span = full_share - cheap_share
+        weight = (policy_share - cheap_share) / span
+        reference = cheap_score + weight * (full_score - cheap_score)
+        margin = policy_score - reference
+    else:
+        margin = policy_score - full_score
+
+    if not dominated:
+        return "FAIL", (
+            f"the policy at {policy_share}% / {policy_score} is no longer dominated by the "
+            f"{full_share}% / {full_score} configuration; the text overstates"
+        )
+    return "PASS", (
+        f"on ChartQA a trained 7B policy retains {policy_share}% of visual tokens for "
+        f"{policy_score}, against {full_share}% for the same {full_score}: it costs "
+        f"{policy_share - full_share:.1f} points more than a fixed configuration and gains "
+        f"{margin:+.1f}, so it is dominated rather than merely inside the hull. Quoted from "
+        "their Table 2; only this benchmark carries a per-benchmark cost in their paper"
+    )
+
+
+
+@check("CV19: image size is a benchmark label, and one corpus is too uniform to test on")
+def _():
+    """Why the free descriptor works across a mixture and cannot work inside one.
+
+    Benchmarks arrive pre-resized to their own conventions, so a size descriptor
+    pooled over a mixture is close to reading a packaging label. Inside a corpus
+    the same fact leaves little to rank. This check asserts both, and asserts
+    that TextVQA is too uniform to carry a descriptor test, which is why the
+    paper prepares that corpus and then declines to use it as evidence.
+    """
+    path = Path("results/size_signature.json")
+    if not path.exists():
+        return "SKIP", "results/size_signature.json not built"
+    rows = json.loads(path.read_text())
+
+    mixture = {
+        k.split(":")[1]: v for k, v in rows.items() if k.startswith("pilot1000")
+    }
+    if len(mixture) < 4:
+        return "SKIP", f"only {len(mixture)} datasets in the mixture signature"
+
+    # Each benchmark must be concentrated on its own size, or "size is a label"
+    # is not what makes the descriptor work.
+    concentrated = {k: v for k, v in mixture.items() if v["modal_share"] >= 0.80}
+    medians = {v["modal_edge"] for v in mixture.values()}
+    if len(concentrated) != len(mixture):
+        return "FAIL", (
+            "not every benchmark is concentrated on one size: "
+            + ", ".join(f"{k} {v['modal_share']:.0%}" for k, v in mixture.items())
+        )
+    if len(medians) < 3:
+        return "FAIL", (
+            f"the benchmarks share {len(medians)} modal sizes, so size cannot act as a "
+            "label and the mixture account is wrong"
+        )
+
+    # And the corpus we declined to use must still be the degenerate one.
+    textvqa = rows.get("textvqa500:textvqa")
+    if textvqa is None:
+        return "SKIP", "textvqa500 signature missing"
+    if textvqa["modal_share"] < 0.95:
+        return "FAIL", (
+            f"TextVQA is now {textvqa['modal_share']:.1%} modal, so it is no longer too "
+            "uniform to test on and the paper's refusal to use it is stale"
+        )
+
+    inside = {
+        k.split(":")[0]: v
+        for k, v in rows.items()
+        if not k.startswith("pilot1000") and not k.startswith("textvqa")
+    }
+    return "PASS", (
+        "across the mixture "
+        + ", ".join(f"{k} {v['modal_edge']}px at {v['modal_share']:.0%}" for k, v in sorted(mixture.items()))
+        + f", which is {len(medians)} distinct modal sizes; inside the reported corpora the "
+        "modal share runs "
+        + f"{min(v['modal_share'] for v in inside.values()):.0%} to "
+        + f"{max(v['modal_share'] for v in inside.values()):.0%}; TextVQA at "
+        f"{textvqa['modal_share']:.1%} is too uniform to carry a descriptor test and is not "
+        "used as evidence"
+    )
+
+
+
+@check("CV20: the pooling confound replicates on a mixture disjoint from the first")
+def _():
+    """The two-regime effect, measured again on corpora that share nothing with it.
+
+    Five of eight corpus-model pairs sit on DocVQA and the mixture half rests on
+    pilot1000, so the result is exposed to being read as one dataset against
+    one mixture. Pooling the three single-domain corpora tests it again on data
+    that overlaps neither. The descriptor must gain from pooling and the
+    model-read signal must not, or what pooling inflates is not specific to a
+    signal that reads packaging.
+    """
+    path = Path("results/second_mixture.json")
+    if not path.exists():
+        return "SKIP", "results/second_mixture.json not built"
+    row = json.loads(path.read_text())
+
+    inside = row["per_corpus"]
+    pooled = row["auroc_pooled"]
+    best_inside_size = max(v["auroc_size"] for v in inside.values())
+    best_inside_entropy = max(v["auroc_entropy"] for v in inside.values())
+
+    size_lift = pooled["image size"] - best_inside_size
+    entropy_lift = pooled["entropy"] - best_inside_entropy
+
+    if size_lift <= 0.03:
+        return "FAIL", (
+            f"pooling lifts the descriptor by only {size_lift:+.3f}; the confound does not "
+            "replicate on the second mixture"
+        )
+    if entropy_lift >= size_lift:
+        return "FAIL", (
+            f"pooling lifts entropy by {entropy_lift:+.3f} against the descriptor's "
+            f"{size_lift:+.3f}, so the inflation is not specific to the free descriptor"
+        )
+    # Inside each part the descriptor must stay weak, or there is no collapse
+    # to explain in the first place.
+    weak_inside = all(v["auroc_size"] <= 0.60 for v in inside.values())
+    if not weak_inside:
+        return "FAIL", (
+            "the descriptor is no longer weak inside every part: "
+            + ", ".join(f"{k} {v['auroc_size']:.3f}" for k, v in inside.items())
+        )
+
+    return "PASS", (
+        f"over {row['n']} examples from three corpora sharing no dataset with pilot1000, "
+        "the free descriptor scores "
+        + ", ".join(f"{k} {v['auroc_size']:.3f}" for k, v in sorted(inside.items()))
+        + f" inside and {pooled['image size']:.3f} pooled, a lift of {size_lift:+.3f}; "
+        f"entropy moves {entropy_lift:+.3f} over the same pooling, so what pooling inflates "
+        "is the descriptor"
+    )
+
+
+
+@check("CV21: the model-read half holds off documents, where the ladder collapses to two rungs")
+def _():
+    """TextVQA: entropy clears, the graded rule loses, and we report no descriptor.
+
+    The corpus is disqualified for a size-descriptor test because 98.8% of its
+    images share one size (CV19), and it is exactly the right corpus for the
+    half of the claim that reads the model instead. It also caps the ladder at
+    two usable rungs, so the binary rule should beat the graded one, which is
+    the ladder claim stated in reverse.
+    """
+    path = Path("results/free_signal_textvqa.json")
+    if not path.exists():
+        return "SKIP", "results/free_signal_textvqa.json not built"
+    rows = json.loads(path.read_text())
+
+    binary = {k: v for k, v in rows.items() if k.startswith("binary, entropy")}
+    ladder = {k: v for k, v in rows.items() if k.startswith("ladder, entropy")}
+    if len(binary) < 4 or len(ladder) < 4:
+        return "SKIP", "entropy rows incomplete"
+
+    cleared = sum(1 for v in binary.values() if v["gap"][1] > 0)
+    if cleared < 4:
+        return "FAIL", (
+            f"entropy clears at {cleared} of {len(binary)} preferences on TextVQA; the text "
+            "says all four, so the positive half no longer holds off documents"
+        )
+
+    # The graded rule must lose here, because there is no rung to choose.
+    best_binary = max(v["gap"][0] for v in binary.values())
+    best_ladder = max(v["gap"][0] for v in ladder.values())
+    if best_ladder >= best_binary:
+        return "FAIL", (
+            f"the graded rule reaches {best_ladder:+.3f} against the binary rule's "
+            f"{best_binary:+.3f}; the text explains the opposite"
+        )
+
+    # And the reason must still be duplicate rungs, checked from the records.
+    from collections import defaultdict
+
+    from gwel.config import load_config
+    from gwel.data.scoring import ScoringPolicy, rescore_records
+    from gwel.oracle.records import deduplicate_records, read_records
+
+    config = load_config("configs/textvqa500.yaml")
+    grouped = defaultdict(dict)
+    try:
+        for row in rescore_records(
+            deduplicate_records(read_records(config.paths.records)), ScoringPolicy()
+        ):
+            grouped[row.example_id][row.config_id] = row
+    except FileNotFoundError:
+        return "SKIP", "textvqa records missing"
+    rungs = ("lowres_384", "lowres_768", "lowres_1152", "full")
+    ids = [e for e in grouped if all(c in grouped[e] for c in rungs)]
+    tokens = np.array([[grouped[e][c].visual_tokens for c in rungs] for e in ids], float)
+    steps = np.diff(tokens, axis=1)
+    distinct = [float((steps[:, k] > 0).mean()) for k in range(steps.shape[1])]
+    if distinct[1] > 0.10 or distinct[2] > 0.10:
+        return "FAIL", (
+            f"the upper rungs are distinct on {distinct[1]:.1%} and {distinct[2]:.1%} of "
+            "pages, so duplicate rungs no longer explain the binary rule winning"
+        )
+
+    return "PASS", (
+        f"on {len(ids)} photographs entropy clears at {cleared} of four preferences (best "
+        f"{best_binary:+.3f} binary against {best_ladder:+.3f} graded), and the upper two "
+        f"rungs are distinct on only {distinct[1]:.1%} and {distinct[2]:.1%} of pages, so "
+        "the graded action space has nothing to choose. No descriptor column is reported "
+        "here: the corpus is 98.8% one size"
+    )
+
+
 def main() -> None:
     width = max(len(r.claim) for r in RESULTS) + 2
     print(f"{'claim':<{width}}{'status':<8}detail")
